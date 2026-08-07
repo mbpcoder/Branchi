@@ -14,10 +14,14 @@ a **Rust** core with a **Flutter** UI on top.
    winget install Rustlang.Rustup
    ```
 2. **Flutter SDK** — install via [flutter.dev](https://docs.flutter.dev/get-started/install/windows)
-   or:
+   or with [Scoop](https://scoop.sh):
    ```powershell
-   winget install Flutter.Flutter
+   scoop bucket add extras
+   scoop install flutter
    ```
+   (There is no official `Flutter.Flutter` winget package — Scoop's `extras`
+   bucket is the simplest package-manager route on Windows.)
+
    Then verify your setup:
    ```powershell
    flutter doctor
