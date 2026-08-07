@@ -1,6 +1,15 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (!kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.linux ||
+          defaultTargetPlatform == TargetPlatform.macOS)) {
+    await windowManager.ensureInitialized();
+  }
   runApp(const RustGitApp());
 }
 
@@ -20,18 +29,161 @@ class RustGitApp extends StatelessWidget {
   }
 }
 
-class WelcomeScreen extends StatelessWidget {
+class RepoTab {
+  RepoTab({required this.id, required this.title});
+
+  final int id;
+  String title;
+}
+
+class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
+
+  @override
+  State<WelcomeScreen> createState() => _WelcomeScreenState();
+}
+
+class _WelcomeScreenState extends State<WelcomeScreen> {
+  final List<RepoTab> _tabs = [RepoTab(id: 0, title: 'New Tab')];
+  int _nextTabId = 1;
+  int _activeTabIndex = 0;
+  bool _isPinned = false;
+
+  void _addTab() {
+    setState(() {
+      _tabs.add(RepoTab(id: _nextTabId, title: 'New Tab'));
+      _nextTabId++;
+      _activeTabIndex = _tabs.length - 1;
+    });
+  }
+
+  void _closeTab(int index) {
+    if (_tabs.length == 1) return;
+    setState(() {
+      _tabs.removeAt(index);
+      if (_activeTabIndex >= _tabs.length) {
+        _activeTabIndex = _tabs.length - 1;
+      } else if (_activeTabIndex > index) {
+        _activeTabIndex--;
+      }
+    });
+  }
+
+  Future<void> _togglePin() async {
+    final pinned = !_isPinned;
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.linux ||
+            defaultTargetPlatform == TargetPlatform.macOS)) {
+      await windowManager.setAlwaysOnTop(pinned);
+    }
+    setState(() => _isPinned = pinned);
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('RustGit')),
-      body: const Center(
-        child: Text(
-          'Welcome to RustGit',
-          style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+      appBar: AppBar(
+        title: const Text('RustGit'),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(40),
+          child: _TabBarRow(
+            tabs: _tabs,
+            activeIndex: _activeTabIndex,
+            onSelect: (index) => setState(() => _activeTabIndex = index),
+            onClose: _closeTab,
+            onAddTab: _addTab,
+          ),
         ),
+        actions: [
+          IconButton(
+            tooltip: _isPinned ? 'Unpin window' : 'Keep window on top',
+            icon: Icon(_isPinned ? Icons.push_pin : Icons.push_pin_outlined),
+            onPressed: _togglePin,
+          ),
+        ],
+      ),
+      body: Center(
+        child: Text(
+          'Welcome to RustGit\n(${_tabs[_activeTabIndex].title})',
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+}
+
+class _TabBarRow extends StatelessWidget {
+  const _TabBarRow({
+    required this.tabs,
+    required this.activeIndex,
+    required this.onSelect,
+    required this.onClose,
+    required this.onAddTab,
+  });
+
+  final List<RepoTab> tabs;
+  final int activeIndex;
+  final ValueChanged<int> onSelect;
+  final ValueChanged<int> onClose;
+  final VoidCallback onAddTab;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      height: 40,
+      color: colorScheme.surfaceContainerHighest,
+      child: Row(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: tabs.length,
+              itemBuilder: (context, index) {
+                final tab = tabs[index];
+                final isActive = index == activeIndex;
+                return InkWell(
+                  onTap: () => onSelect(index),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: isActive
+                          ? colorScheme.surface
+                          : Colors.transparent,
+                      border: Border(
+                        right: BorderSide(color: colorScheme.outlineVariant),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          tab.title,
+                          style: TextStyle(
+                            fontWeight:
+                                isActive ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        InkWell(
+                          onTap: () => onClose(index),
+                          child: const Icon(Icons.close, size: 16),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          IconButton(
+            tooltip: 'New tab',
+            icon: const Icon(Icons.add),
+            onPressed: onAddTab,
+          ),
+        ],
       ),
     );
   }
