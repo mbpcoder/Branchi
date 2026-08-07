@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -55,6 +57,50 @@ class RepoTab {
   String title;
 }
 
+class TerminalSession {
+  TerminalSession({required this.id, required this.title});
+
+  final int id;
+  String title;
+  Process? process;
+}
+
+/// Launches the operating system's default terminal application.
+///
+/// There is no cross-platform API for this, so each platform's common
+/// terminal launch mechanism is used. On Linux this tries a handful of
+/// widely available terminal emulators until one succeeds.
+Future<Process?> launchDefaultTerminal() async {
+  if (kIsWeb) return null;
+  try {
+    if (defaultTargetPlatform == TargetPlatform.macOS) {
+      return await Process.start('open', ['-a', 'Terminal']);
+    }
+    if (defaultTargetPlatform == TargetPlatform.windows) {
+      return await Process.start('cmd.exe', ['/c', 'start', 'cmd.exe']);
+    }
+    if (defaultTargetPlatform == TargetPlatform.linux) {
+      const candidates = [
+        'x-terminal-emulator',
+        'gnome-terminal',
+        'konsole',
+        'xfce4-terminal',
+        'xterm',
+      ];
+      for (final terminal in candidates) {
+        try {
+          return await Process.start(terminal, []);
+        } on ProcessException {
+          continue;
+        }
+      }
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
 
@@ -67,6 +113,60 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   int _nextTabId = 1;
   int _activeTabIndex = 0;
   bool _isPinned = false;
+
+  final List<TerminalSession> _terminalSessions = [];
+  int _nextTerminalId = 0;
+  int _activeTerminalIndex = 0;
+  bool _isTerminalOpen = false;
+
+  Future<void> _toggleTerminal() async {
+    if (_isTerminalOpen) {
+      setState(() => _isTerminalOpen = false);
+      return;
+    }
+    if (_terminalSessions.isEmpty) {
+      await _addTerminalTab();
+    }
+    setState(() => _isTerminalOpen = true);
+  }
+
+  Future<void> _addTerminalTab() async {
+    final session = TerminalSession(
+      id: _nextTerminalId,
+      title: '${translate('terminal')} ${_nextTerminalId + 1}',
+    );
+    _nextTerminalId++;
+    session.process = await launchDefaultTerminal();
+    if (!mounted) return;
+    setState(() {
+      _terminalSessions.add(session);
+      _activeTerminalIndex = _terminalSessions.length - 1;
+    });
+  }
+
+  void _closeTerminalTab(int index) {
+    final session = _terminalSessions[index];
+    session.process?.kill();
+    setState(() {
+      _terminalSessions.removeAt(index);
+      if (_terminalSessions.isEmpty) {
+        _isTerminalOpen = false;
+        _activeTerminalIndex = 0;
+      } else if (_activeTerminalIndex >= _terminalSessions.length) {
+        _activeTerminalIndex = _terminalSessions.length - 1;
+      } else if (_activeTerminalIndex > index) {
+        _activeTerminalIndex--;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    for (final session in _terminalSessions) {
+      session.process?.kill();
+    }
+    super.dispose();
+  }
 
   void _addTab() {
     setState(() {
@@ -140,15 +240,170 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               ),
             ],
           ),
-          body: Center(
-            child: Text(
-              '${translate('welcome')}\n(${_tabs[_activeTabIndex].title})',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-            ),
+          body: Column(
+            children: [
+              Expanded(
+                child: Center(
+                  child: Text(
+                    '${translate('welcome')}\n(${_tabs[_activeTabIndex].title})',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+              if (_isTerminalOpen)
+                _TerminalPanel(
+                  sessions: _terminalSessions,
+                  activeIndex: _activeTerminalIndex,
+                  onSelect: (index) =>
+                      setState(() => _activeTerminalIndex = index),
+                  onClose: _closeTerminalTab,
+                  onAddTab: _addTerminalTab,
+                ),
+              _BottomToolbar(
+                isTerminalOpen: _isTerminalOpen,
+                onToggleTerminal: _toggleTerminal,
+              ),
+            ],
           ),
         );
       },
+    );
+  }
+}
+
+class _BottomToolbar extends StatelessWidget {
+  const _BottomToolbar({
+    required this.isTerminalOpen,
+    required this.onToggleTerminal,
+  });
+
+  final bool isTerminalOpen;
+  final VoidCallback onToggleTerminal;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      height: 32,
+      color: colorScheme.surfaceContainerHighest,
+      child: Row(
+        children: [
+          IconButton(
+            iconSize: 18,
+            tooltip: translate('terminal'),
+            isSelected: isTerminalOpen,
+            style: IconButton.styleFrom(
+              padding: EdgeInsets.zero,
+              backgroundColor:
+                  isTerminalOpen ? colorScheme.surface : Colors.transparent,
+            ),
+            icon: const Icon(Icons.terminal),
+            onPressed: onToggleTerminal,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TerminalPanel extends StatelessWidget {
+  const _TerminalPanel({
+    required this.sessions,
+    required this.activeIndex,
+    required this.onSelect,
+    required this.onClose,
+    required this.onAddTab,
+  });
+
+  final List<TerminalSession> sessions;
+  final int activeIndex;
+  final ValueChanged<int> onSelect;
+  final ValueChanged<int> onClose;
+  final VoidCallback onAddTab;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      height: 200,
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
+      ),
+      child: Column(
+        children: [
+          SizedBox(
+            height: 32,
+            child: Row(
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: sessions.length,
+                    itemBuilder: (context, index) {
+                      final session = sessions[index];
+                      final isActive = index == activeIndex;
+                      return InkWell(
+                        onTap: () => onSelect(index),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          decoration: BoxDecoration(
+                            color: isActive
+                                ? colorScheme.surfaceContainerHighest
+                                : Colors.transparent,
+                            border: Border(
+                              right:
+                                  BorderSide(color: colorScheme.outlineVariant),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                session.title,
+                                style: TextStyle(
+                                  fontWeight: isActive
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              InkWell(
+                                onTap: () => onClose(index),
+                                child: const Icon(Icons.close, size: 16),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                IconButton(
+                  tooltip: translate('new_tab'),
+                  icon: const Icon(Icons.add),
+                  onPressed: onAddTab,
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Center(
+              child: Text(
+                sessions.isEmpty
+                    ? ''
+                    : '${sessions[activeIndex].title}\n${translate('terminal_opened_externally')}',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
