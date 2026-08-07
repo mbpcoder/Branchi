@@ -33,6 +33,8 @@ const Map<String, Map<String, String>> translations = {
     'settings': 'Settings',
     'language': 'Language',
     'close': 'Close',
+    'terminal': 'Terminal',
+    'terminal_opened_externally': 'Opened in the system terminal',
   },
   'ar': {
     'app_title': 'راست‌غيت',
@@ -43,6 +45,8 @@ const Map<String, Map<String, String>> translations = {
     'settings': 'الإعدادات',
     'language': 'اللغة',
     'close': 'إغلاق',
+    'terminal': 'الطرفية',
+    'terminal_opened_externally': 'تم الفتح في الطرفية الخاصة بالنظام',
   },
   'fa': {
     'app_title': 'راست‌گیت',
@@ -53,5 +57,7 @@ const Map<String, Map<String, String>> translations = {
     'settings': 'تنظیمات',
     'language': 'زبان',
     'close': 'بستن',
+    'terminal': 'ترمینال',
+    'terminal_opened_externally': 'در ترمینال سیستم باز شد',
   },
 };
