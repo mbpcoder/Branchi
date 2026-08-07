@@ -1,6 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:window_manager/window_manager.dart';
+
+import 'l10n/app_locale.dart';
+import 'l10n/translations.dart';
+import 'settings/settings_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -10,6 +15,7 @@ Future<void> main() async {
           defaultTargetPlatform == TargetPlatform.macOS)) {
     await windowManager.ensureInitialized();
   }
+  await AppLocale.load();
   runApp(const RustGitApp());
 }
 
@@ -18,13 +24,26 @@ class RustGitApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'RustGit',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
-        useMaterial3: true,
-      ),
-      home: const WelcomeScreen(),
+    return ValueListenableBuilder<String>(
+      valueListenable: AppLocale.languageCode,
+      builder: (context, languageCode, _) {
+        return MaterialApp(
+          title: 'RustGit',
+          locale: Locale(languageCode),
+          supportedLocales:
+              supportedLanguages.map((lang) => Locale(lang.code)),
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
+            useMaterial3: true,
+          ),
+          home: const WelcomeScreen(),
+        );
+      },
     );
   }
 }
@@ -80,36 +99,56 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     setState(() => _isPinned = pinned);
   }
 
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (context) => const SettingsPage()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('RustGit'),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(40),
-          child: _TabBarRow(
-            tabs: _tabs,
-            activeIndex: _activeTabIndex,
-            onSelect: (index) => setState(() => _activeTabIndex = index),
-            onClose: _closeTab,
-            onAddTab: _addTab,
+    return ValueListenableBuilder<String>(
+      valueListenable: AppLocale.languageCode,
+      builder: (context, _, __) {
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(translate('app_title')),
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(40),
+              child: _TabBarRow(
+                tabs: _tabs,
+                activeIndex: _activeTabIndex,
+                onSelect: (index) => setState(() => _activeTabIndex = index),
+                onClose: _closeTab,
+                onAddTab: _addTab,
+              ),
+            ),
+            actions: [
+              IconButton(
+                tooltip: translate('settings'),
+                icon: const Icon(Icons.settings),
+                onPressed: _openSettings,
+              ),
+              IconButton(
+                tooltip: _isPinned
+                    ? translate('unpin_window')
+                    : translate('pin_window'),
+                icon: Icon(
+                  _isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                ),
+                onPressed: _togglePin,
+              ),
+            ],
           ),
-        ),
-        actions: [
-          IconButton(
-            tooltip: _isPinned ? 'Unpin window' : 'Keep window on top',
-            icon: Icon(_isPinned ? Icons.push_pin : Icons.push_pin_outlined),
-            onPressed: _togglePin,
+          body: Center(
+            child: Text(
+              '${translate('welcome')}\n(${_tabs[_activeTabIndex].title})',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+            ),
           ),
-        ],
-      ),
-      body: Center(
-        child: Text(
-          'Welcome to RustGit\n(${_tabs[_activeTabIndex].title})',
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -179,7 +218,7 @@ class _TabBarRow extends StatelessWidget {
             ),
           ),
           IconButton(
-            tooltip: 'New tab',
+            tooltip: translate('new_tab'),
             icon: const Icon(Icons.add),
             onPressed: onAddTab,
           ),
