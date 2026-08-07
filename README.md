@@ -67,13 +67,33 @@ Run its tests with:
 cargo test
 ```
 
+## Local database
+
+RustGit stores its local state (known repos, app settings) in **SQLite**,
+accessed through [`sqlx`](https://github.com/launchbadge/sqlx) — the same
+combination RustDesk's server uses for its own persistence. This keeps the
+door open to later pointing at Postgres/MySQL for a hosted/sync scenario,
+since `sqlx` supports all three with the same query API.
+
+- `core/src/db.rs` — the `Database` type (connect, migrate, CRUD for repos
+  and settings).
+- `core/migrations/` — SQL migration files, run automatically on connect
+  via `sqlx::migrate!`.
+
+No `DATABASE_URL` or `sqlx-cli` setup is required to build: the code uses
+runtime `sqlx::query(...)` calls rather than the compile-time-checked
+`sqlx::query!` macro, so `cargo build`/`cargo test` work offline.
+
 ## Project layout
 
 ```
 rustgit/
 ├── Cargo.toml          # Rust workspace
 ├── core/                # Rust core library (rustgit-core)
-│   └── src/lib.rs
+│   ├── migrations/      # sqlx SQL migrations
+│   └── src/
+│       ├── lib.rs
+│       └── db.rs        # SQLite storage layer (sqlx)
 └── flutter/             # Flutter UI application
     ├── pubspec.yaml
     └── lib/main.dart

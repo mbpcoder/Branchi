@@ -5,6 +5,8 @@
 //! into the app (e.g. via `flutter_rust_bridge`), the same way RustDesk
 //! splits its `libs/` core from its `flutter/` UI.
 
+pub mod db;
+
 pub fn welcome_message() -> String {
     "Welcome to RustGit".to_string()
 }
