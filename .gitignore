@@ -1,0 +1,11 @@
+/target
+Cargo.lock
+
+# Flutter/Dart
+flutter/.dart_tool/
+flutter/.flutter-plugins
+flutter/.flutter-plugins-dependencies
+flutter/.packages
+flutter/build/
+flutter/windows/flutter/ephemeral/
+flutter/*.iml

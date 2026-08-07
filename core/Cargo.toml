@@ -1,0 +1,11 @@
+[package]
+name = "rustgit-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core library for the RustGit client (Rust backend, Flutter UI)"
+
+[lib]
+name = "rustgit_core"
+crate-type = ["staticlib", "cdylib", "lib"]
+
+[dependencies]
