@@ -57,9 +57,18 @@ class _BranchSidebarState extends State<BranchSidebar> {
     super.dispose();
   }
 
+  @override
+  void didUpdateWidget(BranchSidebar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.repoPath != widget.repoPath) {
+      _loadWatchInterval();
+    }
+  }
+
   Future<void> _loadWatchInterval() async {
-    final minutes = await BranchWatchStore.loadIntervalMinutes();
-    if (!mounted) return;
+    final repoPath = widget.repoPath;
+    final minutes = await BranchWatchStore.loadIntervalMinutes(repoPath);
+    if (!mounted || repoPath != widget.repoPath) return;
     setState(() => _watchIntervalMinutes = minutes);
     _restartWatchTimer();
   }
@@ -120,7 +129,7 @@ class _BranchSidebarState extends State<BranchSidebar> {
     if (newInterval == _watchIntervalMinutes) return;
     setState(() => _watchIntervalMinutes = newInterval);
     _restartWatchTimer();
-    await BranchWatchStore.saveIntervalMinutes(newInterval);
+    await BranchWatchStore.saveIntervalMinutes(widget.repoPath, newInterval);
   }
 
   void _showError(String message) {
