@@ -3,6 +3,7 @@ import 'dart:isolate';
 
 import 'package:path/path.dart' as p;
 
+import '../logs/action_log.dart';
 import 'git_ffi.dart';
 import 'models.dart';
 
@@ -38,6 +39,11 @@ class GitActions {
     if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
 
     final error = ffi.init(path);
+    ActionLog.instance.record(
+      'init $path',
+      success: error == null,
+      detail: error,
+    );
     return error == null
         ? const GitActionResult.success()
         : GitActionResult.failure(error);
@@ -56,6 +62,11 @@ class GitActions {
 
     final error = await Isolate.run(
       () => GitFfi.instanceOrNull!.clone(sourceUrl, destinationDirectory),
+    );
+    ActionLog.instance.record(
+      'clone $sourceUrl -> $destinationDirectory',
+      success: error == null,
+      detail: error,
     );
     return error == null
         ? const GitActionResult.success()
@@ -122,6 +133,11 @@ class GitActions {
     if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
 
     final error = await Isolate.run(() => ffi.checkoutBranch(path, name));
+    ActionLog.instance.record(
+      'checkout $name',
+      success: error == null,
+      detail: error,
+    );
     return error == null
         ? const GitActionResult.success()
         : GitActionResult.failure(error);
@@ -139,6 +155,11 @@ class GitActions {
 
     final error =
         await Isolate.run(() => ffi.createBranch(path, name, from: from));
+    ActionLog.instance.record(
+      from == null ? 'branch $name' : 'branch $name (from $from)',
+      success: error == null,
+      detail: error,
+    );
     return error == null
         ? const GitActionResult.success()
         : GitActionResult.failure(error);
@@ -155,6 +176,11 @@ class GitActions {
 
     final error = await Isolate.run(
       () => ffi.deleteBranch(path, name, isRemote: isRemote),
+    );
+    ActionLog.instance.record(
+      'delete ${isRemote ? 'remote ' : ''}branch $name',
+      success: error == null,
+      detail: error,
     );
     return error == null
         ? const GitActionResult.success()
@@ -174,6 +200,11 @@ class GitActions {
 
     final error = await Isolate.run(
       () => ffi.updateBranch(path, name, isRemote: isRemote),
+    );
+    ActionLog.instance.record(
+      'update ${isRemote ? 'remote ' : ''}branch $name',
+      success: error == null,
+      detail: error,
     );
     return error == null
         ? const GitActionResult.success()

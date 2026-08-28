@@ -6,6 +6,7 @@ import 'package:window_manager/window_manager.dart';
 import '../app_state_store.dart';
 import '../l10n/app_locale.dart';
 import '../l10n/translations.dart';
+import '../logs/logs_panel.dart';
 import '../models/repo_tab.dart';
 import '../repo/repository_view.dart';
 import '../settings/settings_page.dart';
@@ -123,6 +124,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     }
     setState(() => tab.isTerminalOpen = true);
     _saveState();
+  }
+
+  void _toggleLogs() {
+    final tab = _tabs[_activeTabIndex];
+    setState(() => tab.isLogsOpen = !tab.isLogsOpen);
   }
 
   Future<void> _addTerminalTab() async {
@@ -291,9 +297,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   onClose: _closeTerminalTab,
                   onAddTab: _addTerminalTab,
                 ),
+              if (_tabs[_activeTabIndex].isLogsOpen)
+                const LogsPanel(),
               BottomToolbar(
                 isTerminalOpen: _tabs[_activeTabIndex].isTerminalOpen,
                 onToggleTerminal: _toggleTerminal,
+                isLogsOpen: _tabs[_activeTabIndex].isLogsOpen,
+                onToggleLogs: _toggleLogs,
               ),
             ],
           ),
