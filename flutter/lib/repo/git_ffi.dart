@@ -202,6 +202,14 @@ class GitFfi {
   /// from this repo it instead lives in the cargo workspace's shared
   /// `target/<profile>/` directory (this crate is a workspace member, not
   /// a standalone one, so the output isn't under `core/target/`).
+  ///
+  /// The process's working directory during `flutter run` is not
+  /// necessarily the `flutter/` source directory: on Windows/Linux desktop
+  /// it's typically the build output directory (e.g.
+  /// `build/windows/x64/runner/Debug`), an unpredictable number of levels
+  /// below the repo root. So rather than guessing a fixed number of `..`
+  /// segments, walk upward from both the current directory and the
+  /// executable's directory looking for `target/<profile>/<libName>`.
   static Iterable<String> _candidatePaths() sync* {
     final libName = Platform.isWindows
         ? 'rustgit_core.dll'
@@ -211,20 +219,31 @@ class GitFfi {
 
     yield libName;
 
-    for (final profile in ['debug', 'release']) {
-      yield p.normalize(
-        p.join(Directory.current.path, '..', 'target', profile, libName),
-      );
-      yield p.normalize(
-        p.join(
-          p.dirname(Platform.script.toFilePath()),
-          '..',
-          '..',
-          'target',
-          profile,
-          libName,
-        ),
-      );
+    final searchRoots = <String>{
+      Directory.current.path,
+      p.dirname(Platform.resolvedExecutable),
+    };
+
+    for (final root in searchRoots) {
+      for (final profile in ['debug', 'release']) {
+        yield* _ancestorCandidates(root, profile, libName);
+      }
+    }
+  }
+
+  /// `root`, `root/..`, `root/../..`, ... up to a reasonable depth, each
+  /// joined with `target/<profile>/<libName>`.
+  static Iterable<String> _ancestorCandidates(
+    String root,
+    String profile,
+    String libName,
+  ) sync* {
+    var dir = p.normalize(root);
+    for (var i = 0; i < 10; i++) {
+      yield p.join(dir, 'target', profile, libName);
+      final parent = p.dirname(dir);
+      if (parent == dir) break;
+      dir = parent;
     }
   }
 }
