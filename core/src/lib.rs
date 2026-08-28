@@ -6,6 +6,7 @@
 //! splits its `libs/` core from its `flutter/` UI.
 
 pub mod db;
+pub mod ffi;
 pub mod git;
 
 pub fn welcome_message() -> String {
