@@ -5,6 +5,8 @@ import 'package:window_manager/window_manager.dart';
 import 'app.dart';
 import 'l10n/app_locale.dart';
 
+export 'app.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (!kIsWeb &&
