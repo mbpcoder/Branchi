@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 
+import '../app_state_store.dart';
 import '../l10n/app_locale.dart';
 import '../l10n/translations.dart';
 import '../models/repo_tab.dart';
@@ -34,15 +35,87 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   int _activeTerminalIndex = 0;
   bool _isTerminalOpen = false;
 
+  @override
+  void initState() {
+    super.initState();
+    _restoreState();
+  }
+
+  /// Reopens the tabs and terminal tabs that were open the last time the
+  /// app was closed, so relaunching the app picks up where the user left
+  /// off instead of always starting from a single blank tab.
+  Future<void> _restoreState() async {
+    final saved = await AppStateStore.load();
+    if (saved == null || !mounted) return;
+
+    final restoredTabs = saved.tabs.isEmpty
+        ? [RepoTab(id: 0, title: 'New Tab')]
+        : [
+            for (var i = 0; i < saved.tabs.length; i++)
+              RepoTab(
+                id: i,
+                title: saved.tabs[i].title,
+                path: saved.tabs[i].path,
+              ),
+          ];
+
+    final restoredTerminals = [
+      for (var i = 0; i < saved.terminalTitles.length; i++)
+        spawnTerminalSession(i, saved.terminalTitles[i]),
+    ];
+
+    if (!mounted) {
+      for (final session in restoredTerminals) {
+        session.dispose();
+      }
+      return;
+    }
+
+    setState(() {
+      _tabs
+        ..clear()
+        ..addAll(restoredTabs);
+      _nextTabId = restoredTabs.length;
+      _activeTabIndex =
+          saved.activeTabIndex.clamp(0, restoredTabs.length - 1);
+
+      _terminalSessions.addAll(restoredTerminals);
+      _nextTerminalId = restoredTerminals.length;
+      _isTerminalOpen = saved.isTerminalOpen && restoredTerminals.isNotEmpty;
+      _activeTerminalIndex = restoredTerminals.isEmpty
+          ? 0
+          : saved.activeTerminalIndex.clamp(0, restoredTerminals.length - 1);
+    });
+  }
+
+  void _saveState() {
+    AppStateStore.save(
+      AppSessionState(
+        tabs: [
+          for (final tab in _tabs)
+            PersistedTab(title: tab.title, path: tab.path),
+        ],
+        activeTabIndex: _activeTabIndex,
+        terminalTitles: [
+          for (final session in _terminalSessions) session.title,
+        ],
+        activeTerminalIndex: _activeTerminalIndex,
+        isTerminalOpen: _isTerminalOpen,
+      ),
+    );
+  }
+
   Future<void> _toggleTerminal() async {
     if (_isTerminalOpen) {
       setState(() => _isTerminalOpen = false);
+      _saveState();
       return;
     }
     if (_terminalSessions.isEmpty) {
       await _addTerminalTab();
     }
     setState(() => _isTerminalOpen = true);
+    _saveState();
   }
 
   Future<void> _addTerminalTab() async {
@@ -59,6 +132,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       _terminalSessions.add(session);
       _activeTerminalIndex = _terminalSessions.length - 1;
     });
+    _saveState();
   }
 
   void _closeTerminalTab(int index) {
@@ -75,6 +149,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         _activeTerminalIndex--;
       }
     });
+    _saveState();
   }
 
   @override
@@ -91,6 +166,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       _nextTabId++;
       _activeTabIndex = _tabs.length - 1;
     });
+    _saveState();
   }
 
   void _closeTab(int index) {
@@ -103,6 +179,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         _activeTabIndex--;
       }
     });
+    _saveState();
   }
 
   Future<void> _togglePin() async {
@@ -130,6 +207,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       tab.path = path;
       tab.title = p.basename(path);
     });
+    _saveState();
   }
 
   @override
@@ -145,7 +223,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               child: TabBarRow(
                 tabs: _tabs,
                 activeIndex: _activeTabIndex,
-                onSelect: (index) => setState(() => _activeTabIndex = index),
+                onSelect: (index) {
+                  setState(() => _activeTabIndex = index);
+                  _saveState();
+                },
                 onClose: _closeTab,
                 onAddTab: _addTab,
               ),
@@ -184,8 +265,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 TerminalPanel(
                   sessions: _terminalSessions,
                   activeIndex: _activeTerminalIndex,
-                  onSelect: (index) =>
-                      setState(() => _activeTerminalIndex = index),
+                  onSelect: (index) {
+                    setState(() => _activeTerminalIndex = index);
+                    _saveState();
+                  },
                   onClose: _closeTerminalTab,
                   onAddTab: _addTerminalTab,
                 ),
