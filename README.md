@@ -57,6 +57,32 @@ flutter run -d windows
 
 This opens a desktop window that says **"Welcome to RustGit"**.
 
+## Running the built app (after `flutter build`)
+
+`flutter run` compiles and launches the app in one step. To instead build a
+release binary and run it separately:
+
+```powershell
+cd flutter
+flutter build windows
+```
+
+The compiled executable is placed at:
+
+```
+flutter\build\windows\x64\runner\Release\rustgit.exe
+```
+
+Launch it directly, e.g.:
+
+```powershell
+.\build\windows\x64\runner\Release\rustgit.exe
+```
+
+or double-click it in File Explorer. The `Release` folder also contains the
+`.dll` files the app needs, so keep `rustgit.exe` in that folder (or copy the
+whole folder) rather than moving the `.exe` alone.
+
 ## Building the Rust core
 
 The Rust core builds independently of the UI:
