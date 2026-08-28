@@ -46,6 +46,48 @@ typedef _CommitDiffDart = Pointer<Utf8> Function(
   Pointer<Utf8> commitId,
 );
 
+typedef _CheckoutBranchNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+);
+typedef _CheckoutBranchDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+);
+
+typedef _CreateBranchNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+  Pointer<Utf8> from,
+);
+typedef _CreateBranchDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+  Pointer<Utf8> from,
+);
+
+typedef _DeleteBranchNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+  Bool isRemote,
+);
+typedef _DeleteBranchDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+  bool isRemote,
+);
+
+typedef _UpdateBranchNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+  Bool isRemote,
+);
+typedef _UpdateBranchDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+  bool isRemote,
+);
+
 typedef _FreeStringNative = Void Function(Pointer<Utf8> ptr);
 typedef _FreeStringDart = void Function(Pointer<Utf8> ptr);
 
@@ -69,6 +111,22 @@ class GitFfi {
         _commitDiff =
             lib.lookupFunction<_CommitDiffNative, _CommitDiffDart>(
           'rustgit_commit_diff',
+        ),
+        _checkoutBranch =
+            lib.lookupFunction<_CheckoutBranchNative, _CheckoutBranchDart>(
+          'rustgit_checkout_branch',
+        ),
+        _createBranch =
+            lib.lookupFunction<_CreateBranchNative, _CreateBranchDart>(
+          'rustgit_create_branch',
+        ),
+        _deleteBranch =
+            lib.lookupFunction<_DeleteBranchNative, _DeleteBranchDart>(
+          'rustgit_delete_branch',
+        ),
+        _updateBranch =
+            lib.lookupFunction<_UpdateBranchNative, _UpdateBranchDart>(
+          'rustgit_update_branch',
         ),
         _freeString = lib.lookupFunction<_FreeStringNative, _FreeStringDart>(
           'rustgit_free_string',
@@ -96,6 +154,10 @@ class GitFfi {
   final _LogDart _log;
   final _BranchesDart _branches;
   final _CommitDiffDart _commitDiff;
+  final _CheckoutBranchDart _checkoutBranch;
+  final _CreateBranchDart _createBranch;
+  final _DeleteBranchDart _deleteBranch;
+  final _UpdateBranchDart _updateBranch;
   final _FreeStringDart _freeString;
 
   /// Runs `git init` at [path] via the Rust core. Returns null on success,
@@ -174,6 +236,63 @@ class GitFfi {
     } finally {
       malloc.free(pathPtr);
       malloc.free(commitIdPtr);
+    }
+  }
+
+  /// Checks out local branch [name]. Returns null on success, or an error
+  /// message on failure.
+  String? checkoutBranch(String path, String name) {
+    final pathPtr = path.toNativeUtf8();
+    final namePtr = name.toNativeUtf8();
+    try {
+      return _consumeError(_checkoutBranch(pathPtr, namePtr));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(namePtr);
+    }
+  }
+
+  /// Creates local branch [name], starting from and tracking [from] (a
+  /// remote-tracking branch like `origin/feature`) if given, or from HEAD
+  /// otherwise. Returns null on success, or an error message on failure.
+  String? createBranch(String path, String name, {String? from}) {
+    final pathPtr = path.toNativeUtf8();
+    final namePtr = name.toNativeUtf8();
+    final fromPtr = (from ?? '').toNativeUtf8();
+    try {
+      return _consumeError(_createBranch(pathPtr, namePtr, fromPtr));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(namePtr);
+      malloc.free(fromPtr);
+    }
+  }
+
+  /// Deletes branch [name] ([isRemote] selects a remote-tracking branch, in
+  /// which case only the local tracking ref is removed). Returns null on
+  /// success, or an error message on failure.
+  String? deleteBranch(String path, String name, {required bool isRemote}) {
+    final pathPtr = path.toNativeUtf8();
+    final namePtr = name.toNativeUtf8();
+    try {
+      return _consumeError(_deleteBranch(pathPtr, namePtr, isRemote));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(namePtr);
+    }
+  }
+
+  /// Updates branch [name]: fetches its remote, and if it's a local branch,
+  /// fast-forwards it to the fetched upstream. Returns null on success, or
+  /// an error message on failure.
+  String? updateBranch(String path, String name, {required bool isRemote}) {
+    final pathPtr = path.toNativeUtf8();
+    final namePtr = name.toNativeUtf8();
+    try {
+      return _consumeError(_updateBranch(pathPtr, namePtr, isRemote));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(namePtr);
     }
   }
 

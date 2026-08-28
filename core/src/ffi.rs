@@ -124,6 +124,90 @@ pub unsafe extern "C" fn rustgit_commit_diff(
     result_to_json_c_string(result)
 }
 
+/// Checks out an existing local branch `name` in the repository at `path`.
+///
+/// # Safety
+/// `path` and `name` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_checkout_branch(
+    path: *const c_char,
+    name: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let name = c_str_to_string(name);
+    let result = GitRepo::open(&path).and_then(|repo| repo.checkout_branch(&name));
+    result_to_c_string(result)
+}
+
+/// Creates a new local branch `name` in the repository at `path`. If `from`
+/// is a non-empty string, it must name an existing remote-tracking branch
+/// (e.g. `origin/feature`) that the new branch starts at and tracks;
+/// otherwise the new branch starts at HEAD. Does not check out the branch.
+///
+/// # Safety
+/// `path`, `name`, and `from` must be valid, NUL-terminated UTF-8 C strings
+/// that outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_create_branch(
+    path: *const c_char,
+    name: *const c_char,
+    from: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let name = c_str_to_string(name);
+    let from = c_str_to_string(from);
+    let from = if from.is_empty() { None } else { Some(from.as_str()) };
+    let result = GitRepo::open(&path).and_then(|repo| repo.create_branch(&name, from));
+    result_to_c_string(result)
+}
+
+/// Deletes branch `name` in the repository at `path`. When `is_remote` is
+/// true, `name` must be a remote-tracking branch (e.g. `origin/feature`) and
+/// only the local tracking ref is removed, not the branch on the server.
+///
+/// # Safety
+/// `path` and `name` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_delete_branch(
+    path: *const c_char,
+    name: *const c_char,
+    is_remote: bool,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let name = c_str_to_string(name);
+    let result = GitRepo::open(&path).and_then(|repo| repo.delete_branch(&name, is_remote));
+    result_to_c_string(result)
+}
+
+/// Updates branch `name` in the repository at `path`. When `is_remote` is
+/// true, `name` must be a remote-tracking branch (e.g. `origin/feature`) and
+/// this just fetches its remote. Otherwise `name` is a local branch that is
+/// fast-forwarded to its upstream (fetching first); it fails rather than
+/// merging if the branch has diverged from its upstream.
+///
+/// # Safety
+/// `path` and `name` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_update_branch(
+    path: *const c_char,
+    name: *const c_char,
+    is_remote: bool,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let name = c_str_to_string(name);
+    let result = GitRepo::open(&path).and_then(|repo| {
+        if is_remote {
+            repo.fetch_remote_for_branch(&name)
+        } else {
+            repo.update_branch(&name)
+        }
+    });
+    result_to_c_string(result)
+}
+
 /// Releases a string previously returned by one of this module's
 /// functions. Safe to call with a null pointer (no-op).
 ///

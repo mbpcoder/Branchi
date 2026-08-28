@@ -116,6 +116,70 @@ class GitActions {
         .toList();
   }
 
+  /// Checks out local branch [name].
+  static Future<GitActionResult> checkoutBranch(String path, String name) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
+
+    final error = await Isolate.run(() => ffi.checkoutBranch(path, name));
+    return error == null
+        ? const GitActionResult.success()
+        : GitActionResult.failure(error);
+  }
+
+  /// Creates local branch [name], tracking remote branch [from] (e.g.
+  /// `origin/feature`) if given, or starting from HEAD otherwise.
+  static Future<GitActionResult> createBranch(
+    String path,
+    String name, {
+    String? from,
+  }) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
+
+    final error =
+        await Isolate.run(() => ffi.createBranch(path, name, from: from));
+    return error == null
+        ? const GitActionResult.success()
+        : GitActionResult.failure(error);
+  }
+
+  /// Deletes branch [name] ([isRemote] selects a remote-tracking branch).
+  static Future<GitActionResult> deleteBranch(
+    String path,
+    String name, {
+    required bool isRemote,
+  }) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
+
+    final error = await Isolate.run(
+      () => ffi.deleteBranch(path, name, isRemote: isRemote),
+    );
+    return error == null
+        ? const GitActionResult.success()
+        : GitActionResult.failure(error);
+  }
+
+  /// Updates branch [name] from its remote ([isRemote] selects a
+  /// remote-tracking branch, which is just re-fetched; a local branch is
+  /// fast-forwarded to its upstream).
+  static Future<GitActionResult> updateBranch(
+    String path,
+    String name, {
+    required bool isRemote,
+  }) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
+
+    final error = await Isolate.run(
+      () => ffi.updateBranch(path, name, isRemote: isRemote),
+    );
+    return error == null
+        ? const GitActionResult.success()
+        : GitActionResult.failure(error);
+  }
+
   static const _missingLibraryError =
       'rustgit_core native library not found. Build it with '
       '`cargo build -p rustgit-core` and rerun the app.';

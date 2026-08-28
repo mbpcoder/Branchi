@@ -150,7 +150,12 @@ class _RepositoryViewState extends State<RepositoryView> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        BranchSidebar(branches: _branches, width: _sidebarWidth),
+        BranchSidebar(
+          repoPath: widget.path,
+          branches: _branches,
+          width: _sidebarWidth,
+          onChanged: _loadRepository,
+        ),
         ColumnResizeHandle(
           onDrag: _resizeSidebar,
           onDragEnd: () => PanelLayoutStore.saveSidebarWidth(_sidebarWidth),

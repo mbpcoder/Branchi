@@ -316,6 +316,155 @@ impl GitRepo {
         Ok(())
     }
 
+    /// Checks out an existing local branch: updates the working tree to
+    /// match it and moves HEAD to point at it.
+    pub fn checkout_branch(&self, name: &str) -> Result<()> {
+        let branch = self
+            .repo
+            .find_branch(name, git2::BranchType::Local)
+            .with_context(|| format!("local branch not found: {name}"))?;
+        let refname = branch
+            .get()
+            .name()
+            .context("branch reference has no name")?
+            .to_string();
+
+        let obj = self.repo.revparse_single(&refname)?;
+        self.repo
+            .checkout_tree(&obj, Some(git2::build::CheckoutBuilder::new().safe()))
+            .with_context(|| format!("failed to checkout branch: {name}"))?;
+        self.repo.set_head(&refname)?;
+        Ok(())
+    }
+
+    /// Creates a new local branch named `name`. If `from` is `Some`, it must
+    /// name an existing remote-tracking branch (e.g. `origin/feature`); the
+    /// new branch starts at that branch's commit and tracks it. Otherwise
+    /// the new branch starts at HEAD. Does not check out the new branch.
+    pub fn create_branch(&self, name: &str, from: Option<&str>) -> Result<()> {
+        let (target, upstream) = match from {
+            Some(remote_branch) => {
+                let branch = self
+                    .repo
+                    .find_branch(remote_branch, git2::BranchType::Remote)
+                    .with_context(|| format!("remote branch not found: {remote_branch}"))?;
+                let commit = branch.get().peel_to_commit()?;
+                (commit, Some(remote_branch.to_string()))
+            }
+            None => {
+                let commit = self.repo.head()?.peel_to_commit()?;
+                (commit, None)
+            }
+        };
+
+        let mut branch = self
+            .repo
+            .branch(name, &target, false)
+            .with_context(|| format!("failed to create branch: {name}"))?;
+        if let Some(upstream) = upstream {
+            branch
+                .set_upstream(Some(&upstream))
+                .with_context(|| format!("failed to track {upstream} from {name}"))?;
+        }
+        Ok(())
+    }
+
+    /// Deletes a local or remote-tracking branch reference. For a remote
+    /// branch this only removes the local tracking ref, mirroring `git
+    /// branch -dr`; it does not push a deletion to the remote server.
+    pub fn delete_branch(&self, name: &str, is_remote: bool) -> Result<()> {
+        let branch_type = if is_remote {
+            git2::BranchType::Remote
+        } else {
+            git2::BranchType::Local
+        };
+        let mut branch = self
+            .repo
+            .find_branch(name, branch_type)
+            .with_context(|| format!("branch not found: {name}"))?;
+        branch
+            .delete()
+            .with_context(|| format!("failed to delete branch: {name}"))?;
+        Ok(())
+    }
+
+    /// Fetches the remote that owns `remote_branch` (e.g. `origin` for
+    /// `origin/feature`), refreshing its remote-tracking branches.
+    pub fn fetch_remote_for_branch(&self, remote_branch: &str) -> Result<()> {
+        let remote_name = remote_branch
+            .split('/')
+            .next()
+            .filter(|s| !s.is_empty())
+            .with_context(|| format!("invalid remote branch name: {remote_branch}"))?;
+        let mut remote = self
+            .repo
+            .find_remote(remote_name)
+            .with_context(|| format!("remote not found: {remote_name}"))?;
+        remote
+            .fetch(&[] as &[&str], None, None)
+            .with_context(|| format!("failed to fetch remote: {remote_name}"))?;
+        Ok(())
+    }
+
+    /// Updates local branch `name` to its upstream: fetches the upstream's
+    /// remote, then fast-forwards the branch (and, if it's the checked-out
+    /// branch, the working tree) to match. Fails rather than merging if the
+    /// branch has diverged from its upstream.
+    pub fn update_branch(&self, name: &str) -> Result<()> {
+        let upstream_name = {
+            let branch = self
+                .repo
+                .find_branch(name, git2::BranchType::Local)
+                .with_context(|| format!("local branch not found: {name}"))?;
+            let upstream = branch
+                .upstream()
+                .with_context(|| format!("branch '{name}' has no upstream to update from"))?;
+            upstream
+                .name()?
+                .context("upstream branch has no name")?
+                .to_string()
+        };
+
+        self.fetch_remote_for_branch(&upstream_name)?;
+
+        let mut branch = self.repo.find_branch(name, git2::BranchType::Local)?;
+        let upstream = branch.upstream()?;
+        let upstream_commit = upstream.get().peel_to_commit()?;
+
+        let branch_refname = branch
+            .get()
+            .name()
+            .context("branch has no name")?
+            .to_string();
+        let branch_oid = branch
+            .get()
+            .target()
+            .context("branch has no direct target")?;
+
+        if branch_oid != upstream_commit.id()
+            && !self
+                .repo
+                .graph_descendant_of(upstream_commit.id(), branch_oid)?
+        {
+            anyhow::bail!(
+                "branch '{name}' has diverged from its upstream; update requires a fast-forward"
+            );
+        }
+
+        branch
+            .get_mut()
+            .set_target(upstream_commit.id(), "rustgit: fast-forward update")?;
+
+        if self.repo.head()?.name() == Some(branch_refname.as_str()) {
+            let obj = self.repo.find_object(upstream_commit.id(), None)?;
+            self.repo
+                .checkout_tree(&obj, Some(git2::build::CheckoutBuilder::new().force()))?;
+            self.repo.set_head(&branch_refname)?;
+        }
+
+        Ok(())
+    }
+
     /// Commit the current index with the given message, using `name`/`email`
     /// as both author and committer. Returns the new commit's id.
     pub fn commit(&self, message: &str, name: &str, email: &str) -> Result<String> {
@@ -458,5 +607,88 @@ mod tests {
         assert_eq!(branches.len(), 1);
         assert!(branches[0].is_head);
         assert!(!branches[0].is_remote);
+    }
+
+    #[test]
+    fn create_and_checkout_local_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        repo.commit("init", "Test User", "test@example.com").unwrap();
+
+        repo.create_branch("feature", None).unwrap();
+        repo.checkout_branch("feature").unwrap();
+
+        let branches = repo.branches().unwrap();
+        let feature = branches.iter().find(|b| b.name == "feature").unwrap();
+        assert!(feature.is_head);
+    }
+
+    #[test]
+    fn delete_local_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        repo.commit("init", "Test User", "test@example.com").unwrap();
+
+        repo.create_branch("feature", None).unwrap();
+        repo.delete_branch("feature", false).unwrap();
+
+        let branches = repo.branches().unwrap();
+        assert!(!branches.iter().any(|b| b.name == "feature"));
+    }
+
+    #[test]
+    fn create_local_branch_from_remote_tracks_it() {
+        let remote_dir = tempfile::tempdir().unwrap();
+        let remote_repo = GitRepo::init(remote_dir.path()).unwrap();
+        write_file(remote_dir.path(), "a.txt", "one");
+        remote_repo.stage("a.txt").unwrap();
+        remote_repo
+            .commit("init", "Test User", "test@example.com")
+            .unwrap();
+
+        let local_dir = tempfile::tempdir().unwrap();
+        let local_repo =
+            GitRepo::clone(remote_dir.path().to_str().unwrap(), local_dir.path()).unwrap();
+
+        local_repo
+            .create_branch("feature", Some("origin/master"))
+            .unwrap();
+
+        let branches = local_repo.branches().unwrap();
+        assert!(branches.iter().any(|b| b.name == "feature" && !b.is_remote));
+    }
+
+    #[test]
+    fn update_branch_fast_forwards_to_upstream() {
+        let remote_dir = tempfile::tempdir().unwrap();
+        let remote_repo = GitRepo::init(remote_dir.path()).unwrap();
+        write_file(remote_dir.path(), "a.txt", "one");
+        remote_repo.stage("a.txt").unwrap();
+        remote_repo
+            .commit("init", "Test User", "test@example.com")
+            .unwrap();
+
+        let local_dir = tempfile::tempdir().unwrap();
+        let local_repo =
+            GitRepo::clone(remote_dir.path().to_str().unwrap(), local_dir.path()).unwrap();
+        let local_branch = local_repo.branches().unwrap()[0].name.clone();
+
+        write_file(remote_dir.path(), "a.txt", "two");
+        remote_repo.stage("a.txt").unwrap();
+        remote_repo
+            .commit("second", "Test User", "test@example.com")
+            .unwrap();
+
+        local_repo.update_branch(&local_branch).unwrap();
+
+        let log = local_repo.log(10).unwrap();
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].summary, "second");
     }
 }
