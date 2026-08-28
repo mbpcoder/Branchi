@@ -1,7 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import 'branch_watch_store.dart';
 import 'git_actions.dart';
 import 'models.dart';
+
+/// Auto-refresh interval choices offered by the watch dropdown, in minutes.
+const List<int> kBranchWatchIntervalsMinutes = [5, 10, 15, 30, 45, 60];
+
+String branchWatchIntervalLabel(int minutes) {
+  if (minutes == 60) return '1 hour';
+  return '$minutes minutes';
+}
 
 /// Left-hand sidebar listing local and remote branches for the open repo,
 /// with collapsible sections and per-branch checkout/delete/update actions.
@@ -30,6 +41,96 @@ class BranchSidebar extends StatefulWidget {
 class _BranchSidebarState extends State<BranchSidebar> {
   bool _localExpanded = true;
   bool _remoteExpanded = true;
+
+  int? _watchIntervalMinutes;
+  Timer? _watchTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadWatchInterval();
+  }
+
+  @override
+  void dispose() {
+    _watchTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(BranchSidebar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.repoPath != widget.repoPath) {
+      _loadWatchInterval();
+    }
+  }
+
+  Future<void> _loadWatchInterval() async {
+    final repoPath = widget.repoPath;
+    final minutes = await BranchWatchStore.loadIntervalMinutes(repoPath);
+    if (!mounted || repoPath != widget.repoPath) return;
+    setState(() => _watchIntervalMinutes = minutes);
+    _restartWatchTimer();
+  }
+
+  void _restartWatchTimer() {
+    _watchTimer?.cancel();
+    final minutes = _watchIntervalMinutes;
+    if (minutes == null) return;
+    _watchTimer = Timer.periodic(Duration(minutes: minutes), (_) {
+      _updateCurrentBranch();
+    });
+  }
+
+  Future<void> _updateCurrentBranch() async {
+    BranchEntry? head;
+    for (final branch in widget.branches) {
+      if (branch.isHead) {
+        head = branch;
+        break;
+      }
+    }
+    if (head == null) return;
+    await GitActions.updateBranch(
+      widget.repoPath,
+      head.name,
+      isRemote: head.isRemote,
+    );
+    if (!mounted) return;
+    widget.onChanged();
+  }
+
+  // Dismissing the menu without picking anything also resolves to `null`
+  // from showMenu, so "off" is modeled as this sentinel instead of `null`
+  // to tell an explicit choice apart from a dismissal.
+  static const int _offValue = -1;
+
+  Future<void> _selectWatchInterval(Offset position) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final selected = await showMenu<int>(
+      context: context,
+      position: RelativeRect.fromRect(
+        position & const Size(1, 1),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        for (final minutes in kBranchWatchIntervalsMinutes)
+          PopupMenuItem<int>(
+            value: minutes,
+            child: Text(branchWatchIntervalLabel(minutes)),
+          ),
+        const PopupMenuDivider(),
+        const PopupMenuItem<int>(value: _offValue, child: Text('Off')),
+      ],
+    );
+    if (!mounted || selected == null) return;
+    final newInterval = selected == _offValue ? null : selected;
+    if (newInterval == _watchIntervalMinutes) return;
+    setState(() => _watchIntervalMinutes = newInterval);
+    _restartWatchTimer();
+    await BranchWatchStore.saveIntervalMinutes(widget.repoPath, newInterval);
+  }
 
   void _showError(String message) {
     if (!mounted) return;
@@ -222,6 +323,32 @@ class _BranchSidebarState extends State<BranchSidebar> {
             title: 'Branches',
             expanded: _localExpanded,
             onToggle: () => setState(() => _localExpanded = !_localExpanded),
+            trailing: Builder(
+              builder: (context) => IconButton(
+                iconSize: 16,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                tooltip: _watchIntervalMinutes == null
+                    ? 'Auto-refresh current branch: off'
+                    : 'Auto-refresh current branch every '
+                        '${branchWatchIntervalLabel(_watchIntervalMinutes!)}',
+                icon: Icon(
+                  _watchIntervalMinutes == null
+                      ? Icons.watch_later_outlined
+                      : Icons.watch_later,
+                  color: _watchIntervalMinutes == null
+                      ? Theme.of(context).colorScheme.onSurfaceVariant
+                      : Theme.of(context).colorScheme.primary,
+                ),
+                onPressed: () {
+                  final box = context.findRenderObject() as RenderBox;
+                  final position = box.localToGlobal(
+                    box.size.bottomLeft(Offset.zero),
+                  );
+                  _selectWatchInterval(position);
+                },
+              ),
+            ),
           ),
           if (_localExpanded)
             for (final branch in local)
@@ -258,36 +385,47 @@ class _SectionHeader extends StatelessWidget {
     required this.title,
     required this.expanded,
     required this.onToggle,
+    this.trailing,
   });
 
   final String title;
   final bool expanded;
   final VoidCallback onToggle;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onToggle,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(4, 12, 12, 4),
-        child: Row(
-          children: [
-            Icon(
-              expanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
-              size: 16,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              title.toUpperCase(),
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 12, 12, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: InkWell(
+              onTap: onToggle,
+              child: Row(
+                children: [
+                  Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_right,
+                    size: 16,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
                   ),
+                  const SizedBox(width: 4),
+                  Text(
+                    title.toUpperCase(),
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                        ),
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
+          ),
+          if (trailing != null) trailing!,
+        ],
       ),
     );
   }
