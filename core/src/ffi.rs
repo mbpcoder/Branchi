@@ -8,6 +8,7 @@
 //! exactly once to release it.
 
 use crate::git::GitRepo;
+use serde::Serialize;
 use std::ffi::{c_char, CStr, CString};
 
 /// Converts a `Result` into the null-on-success / error-string-on-failure
@@ -19,6 +20,22 @@ fn result_to_c_string<T>(result: anyhow::Result<T>) -> *mut c_char {
             .unwrap_or_else(|_| CString::new("unknown error").unwrap())
             .into_raw(),
     }
+}
+
+/// Converts a `Result` into a JSON string of the shape
+/// `{"ok": <value>}` or `{"error": "<message>"}`. Unlike
+/// [`result_to_c_string`] this always returns a non-null pointer, which
+/// callers must still free with [`rustgit_free_string`].
+fn result_to_json_c_string<T: Serialize>(result: anyhow::Result<T>) -> *mut c_char {
+    let payload = match result {
+        Ok(value) => serde_json::json!({ "ok": value }),
+        Err(err) => serde_json::json!({ "error": err.to_string() }),
+    };
+    let text = serde_json::to_string(&payload)
+        .unwrap_or_else(|_| "{\"error\":\"failed to serialize response\"}".to_string());
+    CString::new(text)
+        .unwrap_or_else(|_| CString::new("{\"error\":\"invalid utf8 in response\"}").unwrap())
+        .into_raw()
 }
 
 /// # Safety
@@ -60,6 +77,51 @@ pub unsafe extern "C" fn rustgit_clone(url: *const c_char, path: *const c_char) 
 pub unsafe extern "C" fn rustgit_is_repository(path: *const c_char) -> bool {
     let path = c_str_to_string(path);
     GitRepo::open(&path).is_ok()
+}
+
+/// Returns the commit history reachable from HEAD (newest first, at most
+/// `limit` entries) as a JSON string: `{"ok": [CommitInfo, ...]}` or
+/// `{"error": "..."}`.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
+/// call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_log(path: *const c_char, limit: usize) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let result = GitRepo::open(&path).and_then(|repo| repo.log(limit));
+    result_to_json_c_string(result)
+}
+
+/// Returns local and remote-tracking branches as a JSON string:
+/// `{"ok": [BranchInfo, ...]}` or `{"error": "..."}`.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
+/// call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_branches(path: *const c_char) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let result = GitRepo::open(&path).and_then(|repo| repo.branches());
+    result_to_json_c_string(result)
+}
+
+/// Returns the file-level diff of `commit_id` against its first parent (or
+/// the empty tree, for a root commit) as a JSON string:
+/// `{"ok": [DiffFileEntry, ...]}` or `{"error": "..."}`.
+///
+/// # Safety
+/// `path` and `commit_id` must be valid, NUL-terminated UTF-8 C strings
+/// that outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_commit_diff(
+    path: *const c_char,
+    commit_id: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let commit_id = c_str_to_string(commit_id);
+    let result = GitRepo::open(&path).and_then(|repo| repo.commit_diff(&commit_id));
+    result_to_json_c_string(result)
 }
 
 /// Releases a string previously returned by one of this module's

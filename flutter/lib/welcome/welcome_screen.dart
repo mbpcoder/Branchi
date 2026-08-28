@@ -6,12 +6,12 @@ import 'package:window_manager/window_manager.dart';
 import '../l10n/app_locale.dart';
 import '../l10n/translations.dart';
 import '../models/repo_tab.dart';
+import '../repo/repository_view.dart';
 import '../settings/settings_page.dart';
 import '../terminal/terminal_panel.dart';
 import '../terminal/terminal_session.dart';
 import '../widgets/bottom_toolbar.dart';
 import '../widgets/tab_bar_row.dart';
-import 'repository_opened_placeholder.dart';
 import 'welcome_form.dart';
 
 /// The app's main screen: the tab bar, the active tab's content (start
@@ -171,7 +171,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             children: [
               Expanded(
                 child: _tabs[_activeTabIndex].path != null
-                    ? RepositoryOpenedPlaceholder(
+                    ? RepositoryView(
+                        key: ValueKey(_tabs[_activeTabIndex].path),
                         path: _tabs[_activeTabIndex].path!,
                       )
                     : WelcomeForm(

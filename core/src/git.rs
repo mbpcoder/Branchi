@@ -5,14 +5,16 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use git2::{Repository, StatusOptions};
+use git2::{Diff, DiffOptions, Repository, StatusOptions};
+use serde::Serialize;
 use std::path::Path;
 
 pub struct GitRepo {
     repo: Repository,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FileStatus {
     New,
     Modified,
@@ -29,20 +31,33 @@ pub struct StatusEntry {
     pub unstaged: Option<FileStatus>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CommitInfo {
     pub id: String,
     pub summary: String,
     pub author: String,
     pub email: String,
     pub time: DateTime<Utc>,
+    pub parent_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BranchInfo {
     pub name: String,
     pub is_head: bool,
     pub is_remote: bool,
+}
+
+/// A single file's change within a commit's diff against its first parent
+/// (or against the empty tree, for a root commit).
+#[derive(Debug, Clone, Serialize)]
+pub struct DiffFileEntry {
+    pub path: String,
+    pub status: FileStatus,
+    pub additions: usize,
+    pub deletions: usize,
+    /// Unified diff text (git's standard patch format) for this file.
+    pub patch: String,
 }
 
 impl GitRepo {
@@ -142,10 +157,118 @@ impl GitRepo {
                 author: author.name().unwrap_or("").to_string(),
                 email: author.email().unwrap_or("").to_string(),
                 time,
+                parent_ids: commit.parent_ids().map(|id| id.to_string()).collect(),
             });
         }
 
         Ok(commits)
+    }
+
+    /// The file-level diff of `commit_id` against its first parent (or the
+    /// empty tree, if it's a root commit), one entry per changed file.
+    pub fn commit_diff(&self, commit_id: &str) -> Result<Vec<DiffFileEntry>> {
+        let oid = git2::Oid::from_str(commit_id)
+            .with_context(|| format!("invalid commit id: {commit_id}"))?;
+        let commit = self.repo.find_commit(oid)?;
+        let tree = commit.tree()?;
+        let parent_tree = commit.parents().next().map(|p| p.tree()).transpose()?;
+
+        let mut opts = DiffOptions::new();
+        let diff =
+            self.repo
+                .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
+
+        Self::diff_to_file_entries(&diff)
+    }
+
+    fn diff_to_file_entries(diff: &Diff) -> Result<Vec<DiffFileEntry>> {
+        use std::cell::RefCell;
+        use std::collections::HashMap;
+
+        struct Entry {
+            status: FileStatus,
+            additions: usize,
+            deletions: usize,
+            patch: String,
+        }
+
+        let entries: RefCell<HashMap<String, Entry>> = RefCell::new(HashMap::new());
+        let order: RefCell<Vec<String>> = RefCell::new(Vec::new());
+
+        diff.foreach(
+            &mut |delta, _progress| {
+                let path = delta
+                    .new_file()
+                    .path()
+                    .or_else(|| delta.old_file().path())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+
+                let status = match delta.status() {
+                    git2::Delta::Added => FileStatus::New,
+                    git2::Delta::Deleted => FileStatus::Deleted,
+                    git2::Delta::Renamed => FileStatus::Renamed,
+                    git2::Delta::Typechange => FileStatus::Typechange,
+                    _ => FileStatus::Modified,
+                };
+
+                order.borrow_mut().push(path.clone());
+                entries.borrow_mut().insert(
+                    path,
+                    Entry {
+                        status,
+                        additions: 0,
+                        deletions: 0,
+                        patch: String::new(),
+                    },
+                );
+                true
+            },
+            None,
+            None,
+            Some(&mut |delta, _hunk, line| {
+                let path = delta
+                    .new_file()
+                    .path()
+                    .or_else(|| delta.old_file().path())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+
+                let mut entries = entries.borrow_mut();
+                if let Some(entry) = entries.get_mut(&path) {
+                    let prefix = match line.origin() {
+                        '+' => {
+                            entry.additions += 1;
+                            "+"
+                        }
+                        '-' => {
+                            entry.deletions += 1;
+                            "-"
+                        }
+                        ' ' => " ",
+                        _ => "",
+                    };
+                    entry.patch.push_str(prefix);
+                    entry.patch.push_str(&String::from_utf8_lossy(line.content()));
+                }
+                true
+            }),
+        )?;
+
+        let mut entries = entries.into_inner();
+        Ok(order
+            .into_inner()
+            .into_iter()
+            .filter_map(|path| {
+                entries.remove(&path).map(|entry| DiffFileEntry {
+                    path,
+                    status: entry.status,
+                    additions: entry.additions,
+                    deletions: entry.deletions,
+                    patch: entry.patch,
+                })
+            })
+            .collect())
     }
 
     /// Local and remote-tracking branches.
@@ -271,6 +394,55 @@ mod tests {
         let status = repo.status().unwrap();
         assert_eq!(status[0].staged, None);
         assert_eq!(status[0].unstaged, Some(FileStatus::Modified));
+    }
+
+    #[test]
+    fn commit_diff_reports_added_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        write_file(dir.path(), "a.txt", "one\ntwo\n");
+        repo.stage("a.txt").unwrap();
+        let first = repo.commit("init", "Test User", "test@example.com").unwrap();
+
+        let diff = repo.commit_diff(&first).unwrap();
+        assert_eq!(diff.len(), 1);
+        assert_eq!(diff[0].path, "a.txt");
+        assert_eq!(diff[0].status, FileStatus::New);
+        assert_eq!(diff[0].additions, 2);
+        assert_eq!(diff[0].deletions, 0);
+
+        write_file(dir.path(), "a.txt", "one\ntwo\nthree\n");
+        repo.stage("a.txt").unwrap();
+        let second = repo
+            .commit("add line", "Test User", "test@example.com")
+            .unwrap();
+
+        let diff = repo.commit_diff(&second).unwrap();
+        assert_eq!(diff.len(), 1);
+        assert_eq!(diff[0].status, FileStatus::Modified);
+        assert_eq!(diff[0].additions, 1);
+        assert_eq!(diff[0].deletions, 0);
+    }
+
+    #[test]
+    fn log_includes_parent_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        let first = repo.commit("init", "Test User", "test@example.com").unwrap();
+
+        write_file(dir.path(), "a.txt", "two");
+        repo.stage("a.txt").unwrap();
+        repo.commit("second", "Test User", "test@example.com")
+            .unwrap();
+
+        let log = repo.log(10).unwrap();
+        assert_eq!(log.len(), 2);
+        assert!(log[0].parent_ids.contains(&first));
+        assert!(log[1].parent_ids.is_empty());
     }
 
     #[test]
