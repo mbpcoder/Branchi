@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:xterm/xterm.dart';
 
 import '../l10n/app_locale.dart';
+import '../logs/logs_panel.dart' show PanelResizeHandle, kPanelMinHeight, kPanelMaxHeight;
 import 'terminal_session.dart';
 
 /// The bottom terminal panel: a row of terminal tabs plus the active
@@ -14,6 +15,8 @@ class TerminalPanel extends StatelessWidget {
     required this.onSelect,
     required this.onClose,
     required this.onAddTab,
+    required this.height,
+    required this.onHeightChanged,
   });
 
   final List<TerminalSession> sessions;
@@ -21,84 +24,97 @@ class TerminalPanel extends StatelessWidget {
   final ValueChanged<int> onSelect;
   final ValueChanged<int> onClose;
   final VoidCallback onAddTab;
+  final double height;
+  final ValueChanged<double> onHeightChanged;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      height: 200,
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
-      ),
-      child: Column(
-        children: [
-          SizedBox(
-            height: 32,
-            child: Row(
-              children: [
-                Expanded(
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: sessions.length,
-                    itemBuilder: (context, index) {
-                      final session = sessions[index];
-                      final isActive = index == activeIndex;
-                      return InkWell(
-                        onTap: () => onSelect(index),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          decoration: BoxDecoration(
-                            color: isActive
-                                ? colorScheme.surfaceContainerHighest
-                                : Colors.transparent,
-                            border: Border(
-                              right:
-                                  BorderSide(color: colorScheme.outlineVariant),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                session.title,
-                                style: TextStyle(
-                                  fontWeight: isActive
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        PanelResizeHandle(
+          onDrag: (delta) => onHeightChanged(
+            (height + delta).clamp(kPanelMinHeight, kPanelMaxHeight),
+          ),
+        ),
+        Container(
+          height: height,
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
+          ),
+          child: Column(
+            children: [
+              SizedBox(
+                height: 32,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: sessions.length,
+                        itemBuilder: (context, index) {
+                          final session = sessions[index];
+                          final isActive = index == activeIndex;
+                          return InkWell(
+                            onTap: () => onSelect(index),
+                            child: Container(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
+                              decoration: BoxDecoration(
+                                color: isActive
+                                    ? colorScheme.surfaceContainerHighest
+                                    : Colors.transparent,
+                                border: Border(
+                                  right: BorderSide(
+                                      color: colorScheme.outlineVariant),
                                 ),
                               ),
-                              const SizedBox(width: 6),
-                              InkWell(
-                                onTap: () => onClose(index),
-                                child: const Icon(Icons.close, size: 16),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    session.title,
+                                    style: TextStyle(
+                                      fontWeight: isActive
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  InkWell(
+                                    onTap: () => onClose(index),
+                                    child: const Icon(Icons.close, size: 16),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: translate('new_tab'),
+                      icon: const Icon(Icons.add),
+                      onPressed: onAddTab,
+                    ),
+                  ],
                 ),
-                IconButton(
-                  tooltip: translate('new_tab'),
-                  icon: const Icon(Icons.add),
-                  onPressed: onAddTab,
-                ),
-              ],
-            ),
+              ),
+              Expanded(
+                child: sessions.isEmpty
+                    ? const SizedBox.shrink()
+                    : TerminalView(
+                        key: ValueKey(sessions[activeIndex].id),
+                        sessions[activeIndex].terminal,
+                        autofocus: true,
+                      ),
+              ),
+            ],
           ),
-          Expanded(
-            child: sessions.isEmpty
-                ? const SizedBox.shrink()
-                : TerminalView(
-                    key: ValueKey(sessions[activeIndex].id),
-                    sessions[activeIndex].terminal,
-                    autofocus: true,
-                  ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

@@ -312,8 +312,18 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                       },
                       onClose: _closeTerminalTab,
                       onAddTab: _addTerminalTab,
+                      height: _tabs[_activeTabIndex].terminalHeight,
+                      onHeightChanged: (value) => setState(
+                        () => _tabs[_activeTabIndex].terminalHeight = value,
+                      ),
                     ),
-                  if (_tabs[_activeTabIndex].isLogsOpen) const LogsPanel(),
+                  if (_tabs[_activeTabIndex].isLogsOpen)
+                    LogsPanel(
+                      height: _tabs[_activeTabIndex].logsHeight,
+                      onHeightChanged: (value) => setState(
+                        () => _tabs[_activeTabIndex].logsHeight = value,
+                      ),
+                    ),
                   BottomToolbar(
                     isTerminalOpen: _tabs[_activeTabIndex].isTerminalOpen,
                     onToggleTerminal: _toggleTerminal,

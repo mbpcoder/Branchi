@@ -16,4 +16,6 @@ class RepoTab {
   int activeTerminalIndex = 0;
   bool isTerminalOpen = false;
   bool isLogsOpen = false;
+  double terminalHeight = 200;
+  double logsHeight = 200;
 }
