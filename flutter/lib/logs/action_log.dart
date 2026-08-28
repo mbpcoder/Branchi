@@ -28,6 +28,12 @@ class ActionLog extends ChangeNotifier {
 
   List<ActionLogEntry> get entries => List.unmodifiable(_entries);
 
+  void clear() {
+    if (_entries.isEmpty) return;
+    _entries.clear();
+    notifyListeners();
+  }
+
   void record(String action, {required bool success, String? detail}) {
     _entries.insert(
       0,

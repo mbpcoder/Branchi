@@ -323,31 +323,48 @@ class _BranchSidebarState extends State<BranchSidebar> {
             title: 'Branches',
             expanded: _localExpanded,
             onToggle: () => setState(() => _localExpanded = !_localExpanded),
-            trailing: Builder(
-              builder: (context) => IconButton(
-                iconSize: 16,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                tooltip: _watchIntervalMinutes == null
-                    ? 'Auto-refresh current branch: off'
-                    : 'Auto-refresh current branch every '
-                        '${branchWatchIntervalLabel(_watchIntervalMinutes!)}',
-                icon: Icon(
-                  _watchIntervalMinutes == null
-                      ? Icons.watch_later_outlined
-                      : Icons.watch_later,
-                  color: _watchIntervalMinutes == null
-                      ? Theme.of(context).colorScheme.onSurfaceVariant
-                      : Theme.of(context).colorScheme.primary,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  iconSize: 16,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  tooltip: 'Update current branch',
+                  icon: Icon(
+                    Icons.refresh,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  onPressed: _updateCurrentBranch,
                 ),
-                onPressed: () {
-                  final box = context.findRenderObject() as RenderBox;
-                  final position = box.localToGlobal(
-                    box.size.bottomLeft(Offset.zero),
-                  );
-                  _selectWatchInterval(position);
-                },
-              ),
+                const SizedBox(width: 4),
+                Builder(
+                  builder: (context) => IconButton(
+                    iconSize: 16,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    tooltip: _watchIntervalMinutes == null
+                        ? 'Auto-refresh current branch: off'
+                        : 'Auto-refresh current branch every '
+                            '${branchWatchIntervalLabel(_watchIntervalMinutes!)}',
+                    icon: Icon(
+                      _watchIntervalMinutes == null
+                          ? Icons.watch_later_outlined
+                          : Icons.watch_later,
+                      color: _watchIntervalMinutes == null
+                          ? Theme.of(context).colorScheme.onSurfaceVariant
+                          : Theme.of(context).colorScheme.primary,
+                    ),
+                    onPressed: () {
+                      final box = context.findRenderObject() as RenderBox;
+                      final position = box.localToGlobal(
+                        box.size.bottomLeft(Offset.zero),
+                      );
+                      _selectWatchInterval(position);
+                    },
+                  ),
+                ),
+              ],
             ),
           ),
           if (_localExpanded)
