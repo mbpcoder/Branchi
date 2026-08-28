@@ -1,9 +1,12 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_pty/flutter_pty.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:xterm/xterm.dart';
 
 import 'l10n/app_locale.dart';
 import 'l10n/translations.dart';
@@ -58,47 +61,55 @@ class RepoTab {
 }
 
 class TerminalSession {
-  TerminalSession({required this.id, required this.title});
+  TerminalSession({
+    required this.id,
+    required this.title,
+    required this.pty,
+    required this.terminal,
+  });
 
   final int id;
   String title;
-  Process? process;
+  final Pty pty;
+  final Terminal terminal;
+
+  void dispose() {
+    pty.kill();
+  }
 }
 
-/// Launches the operating system's default terminal application.
-///
-/// There is no cross-platform API for this, so each platform's common
-/// terminal launch mechanism is used. On Linux this tries a handful of
-/// widely available terminal emulators until one succeeds.
-Future<Process?> launchDefaultTerminal() async {
-  if (kIsWeb) return null;
-  try {
-    if (defaultTargetPlatform == TargetPlatform.macOS) {
-      return await Process.start('open', ['-a', 'Terminal']);
-    }
-    if (defaultTargetPlatform == TargetPlatform.windows) {
-      return await Process.start('cmd.exe', ['/c', 'start', 'cmd.exe']);
-    }
-    if (defaultTargetPlatform == TargetPlatform.linux) {
-      const candidates = [
-        'x-terminal-emulator',
-        'gnome-terminal',
-        'konsole',
-        'xfce4-terminal',
-        'xterm',
-      ];
-      for (final terminal in candidates) {
-        try {
-          return await Process.start(terminal, []);
-        } on ProcessException {
-          continue;
-        }
-      }
-    }
-  } catch (_) {
-    return null;
+/// The shell to launch inside the embedded terminal.
+String _defaultShell() {
+  if (Platform.isWindows) {
+    return Platform.environment['COMSPEC'] ?? 'powershell.exe';
   }
-  return null;
+  return Platform.environment['SHELL'] ?? '/bin/bash';
+}
+
+/// Spawns a real shell in a pseudo-terminal and wires it up to an in-app
+/// [Terminal], so the terminal panel runs inside the app itself rather than
+/// opening a separate OS terminal window (which isn't available in headless
+/// / containerized environments).
+TerminalSession _spawnTerminalSession(int id, String title) {
+  final pty = Pty.start(
+    _defaultShell(),
+    columns: 80,
+    rows: 24,
+    workingDirectory: Directory.current.path,
+  );
+
+  final terminal = Terminal(maxLines: 10000);
+  terminal.onOutput = (data) => pty.write(const Utf8Encoder().convert(data));
+  terminal.onResize = (width, height, pixelWidth, pixelHeight) {
+    pty.resize(height, width);
+  };
+
+  pty.output
+      .cast<List<int>>()
+      .transform(const Utf8Decoder(allowMalformed: true))
+      .listen(terminal.write);
+
+  return TerminalSession(id: id, title: title, pty: pty, terminal: terminal);
 }
 
 class WelcomeScreen extends StatefulWidget {
@@ -131,13 +142,15 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 
   Future<void> _addTerminalTab() async {
-    final session = TerminalSession(
-      id: _nextTerminalId,
-      title: '${translate('terminal')} ${_nextTerminalId + 1}',
+    final session = _spawnTerminalSession(
+      _nextTerminalId,
+      '${translate('terminal')} ${_nextTerminalId + 1}',
     );
     _nextTerminalId++;
-    session.process = await launchDefaultTerminal();
-    if (!mounted) return;
+    if (!mounted) {
+      session.dispose();
+      return;
+    }
     setState(() {
       _terminalSessions.add(session);
       _activeTerminalIndex = _terminalSessions.length - 1;
@@ -146,7 +159,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   void _closeTerminalTab(int index) {
     final session = _terminalSessions[index];
-    session.process?.kill();
+    session.dispose();
     setState(() {
       _terminalSessions.removeAt(index);
       if (_terminalSessions.isEmpty) {
@@ -163,7 +176,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   @override
   void dispose() {
     for (final session in _terminalSessions) {
-      session.process?.kill();
+      session.dispose();
     }
     super.dispose();
   }
@@ -392,15 +405,13 @@ class _TerminalPanel extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: Center(
-              child: Text(
-                sessions.isEmpty
-                    ? ''
-                    : '${sessions[activeIndex].title}\n${translate('terminal_opened_externally')}',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ),
+            child: sessions.isEmpty
+                ? const SizedBox.shrink()
+                : TerminalView(
+                    key: ValueKey(sessions[activeIndex].id),
+                    sessions[activeIndex].terminal,
+                    autofocus: true,
+                  ),
           ),
         ],
       ),
