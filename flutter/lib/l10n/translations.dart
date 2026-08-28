@@ -4,7 +4,7 @@
 /// strings: a simple `key -> translated string` map per language instead of
 /// generated ARB/`intl` bindings, so new languages can be added by dropping
 /// in another map.
-library;
+library rustgit.l10n.translations;
 
 class LangInfo {
   const LangInfo({required this.code, required this.name, required this.rtl});
@@ -34,7 +34,6 @@ const Map<String, Map<String, String>> translations = {
     'language': 'Language',
     'close': 'Close',
     'terminal': 'Terminal',
-    'terminal_opened_externally': 'Opened in the system terminal',
   },
   'ar': {
     'app_title': 'راست‌غيت',
@@ -46,7 +45,6 @@ const Map<String, Map<String, String>> translations = {
     'language': 'اللغة',
     'close': 'إغلاق',
     'terminal': 'الطرفية',
-    'terminal_opened_externally': 'تم الفتح في الطرفية الخاصة بالنظام',
   },
   'fa': {
     'app_title': 'راست‌گیت',
@@ -58,6 +56,5 @@ const Map<String, Map<String, String>> translations = {
     'language': 'زبان',
     'close': 'بستن',
     'terminal': 'ترمینال',
-    'terminal_opened_externally': 'در ترمینال سیستم باز شد',
   },
 };
