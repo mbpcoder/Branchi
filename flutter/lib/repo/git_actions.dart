@@ -4,6 +4,7 @@ import 'dart:isolate';
 import 'package:path/path.dart' as p;
 
 import 'git_ffi.dart';
+import 'models.dart';
 
 /// Result of a git action: whether it succeeded and, on failure, a message
 /// suitable for showing to the user.
@@ -75,7 +76,55 @@ class GitActions {
     return name;
   }
 
+  /// Commit history reachable from HEAD, newest first, at most [limit]
+  /// entries. Runs on a background isolate since it walks repo history.
+  static Future<List<CommitEntry>> log(String path, {int limit = 200}) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) throw StateError(_missingLibraryErrorWithPaths());
+
+    final raw = await Isolate.run(() => ffi.log(path, limit));
+    return raw
+        .cast<Map<String, dynamic>>()
+        .map(CommitEntry.fromJson)
+        .toList();
+  }
+
+  /// Local and remote-tracking branches.
+  static Future<List<BranchEntry>> branches(String path) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) throw StateError(_missingLibraryErrorWithPaths());
+
+    final raw = await Isolate.run(() => ffi.branches(path));
+    return raw
+        .cast<Map<String, dynamic>>()
+        .map(BranchEntry.fromJson)
+        .toList();
+  }
+
+  /// The file-level diff of [commitId] against its first parent.
+  static Future<List<DiffFileEntry>> commitDiff(
+    String path,
+    String commitId,
+  ) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) throw StateError(_missingLibraryErrorWithPaths());
+
+    final raw = await Isolate.run(() => ffi.commitDiff(path, commitId));
+    return raw
+        .cast<Map<String, dynamic>>()
+        .map(DiffFileEntry.fromJson)
+        .toList();
+  }
+
   static const _missingLibraryError =
       'rustgit_core native library not found. Build it with '
       '`cargo build -p rustgit-core` and rerun the app.';
+
+  /// [_missingLibraryError] plus the exact paths that were tried, so a
+  /// failure report says where to look instead of just "not found".
+  static String _missingLibraryErrorWithPaths() {
+    final tried = GitFfi.lastAttemptedPaths;
+    if (tried.isEmpty) return _missingLibraryError;
+    return '$_missingLibraryError\nTried:\n${tried.map((p) => '  $p').join('\n')}';
+  }
 }
