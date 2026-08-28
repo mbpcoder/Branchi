@@ -35,12 +35,16 @@ String defaultShell() {
 /// [Terminal], so the terminal panel runs inside the app itself rather than
 /// opening a separate OS terminal window (which isn't available in headless
 /// / containerized environments).
-TerminalSession spawnTerminalSession(int id, String title) {
+TerminalSession spawnTerminalSession(
+  int id,
+  String title, {
+  String? workingDirectory,
+}) {
   final pty = Pty.start(
     defaultShell(),
     columns: 80,
     rows: 24,
-    workingDirectory: Directory.current.path,
+    workingDirectory: workingDirectory ?? Directory.current.path,
   );
 
   final terminal = Terminal(maxLines: 10000);

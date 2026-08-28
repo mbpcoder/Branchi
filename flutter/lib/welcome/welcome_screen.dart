@@ -49,6 +49,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     final session = spawnTerminalSession(
       _nextTerminalId,
       '${translate('terminal')} ${_nextTerminalId + 1}',
+      workingDirectory: _tabs[_activeTabIndex].path,
     );
     _nextTerminalId++;
     if (!mounted) {
