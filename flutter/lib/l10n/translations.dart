@@ -4,7 +4,7 @@
 /// strings: a simple `key -> translated string` map per language instead of
 /// generated ARB/`intl` bindings, so new languages can be added by dropping
 /// in another map.
-library;
+library rustgit.l10n.translations;
 
 class LangInfo {
   const LangInfo({required this.code, required this.name, required this.rtl});
