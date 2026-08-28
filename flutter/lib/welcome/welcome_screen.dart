@@ -12,6 +12,7 @@ import '../repo/repository_view.dart';
 import '../settings/settings_page.dart';
 import '../terminal/terminal_panel.dart';
 import '../terminal/terminal_session.dart';
+import '../theme/app_theme.dart';
 import '../widgets/bottom_toolbar.dart';
 import '../widgets/tab_bar_row.dart';
 import 'welcome_form.dart';
@@ -237,76 +238,92 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     return ValueListenableBuilder<String>(
       valueListenable: AppLocale.languageCode,
       builder: (context, _, __) {
-        return Scaffold(
-          appBar: AppBar(
-            title: Text(translate('app_title')),
-            bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(40),
-              child: TabBarRow(
-                tabs: _tabs,
-                activeIndex: _activeTabIndex,
-                onSelect: (index) {
-                  setState(() => _activeTabIndex = index);
-                  _saveState();
-                },
-                onClose: _closeTab,
-                onAddTab: _addTab,
-              ),
-            ),
-            actions: [
-              IconButton(
-                tooltip: translate('settings'),
-                icon: const Icon(Icons.settings),
-                onPressed: _openSettings,
-              ),
-              IconButton(
-                tooltip: _isPinned
-                    ? translate('unpin_window')
-                    : translate('pin_window'),
-                icon: Icon(
-                  _isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+        return ValueListenableBuilder<ThemeMode>(
+          valueListenable: AppTheme.themeMode,
+          builder: (context, themeMode, ___) {
+            final isDark = themeMode == ThemeMode.dark ||
+                (themeMode == ThemeMode.system &&
+                    MediaQuery.platformBrightnessOf(context) ==
+                        Brightness.dark);
+            return Scaffold(
+              appBar: AppBar(
+                title: Text(translate('app_title')),
+                bottom: PreferredSize(
+                  preferredSize: const Size.fromHeight(40),
+                  child: TabBarRow(
+                    tabs: _tabs,
+                    activeIndex: _activeTabIndex,
+                    onSelect: (index) {
+                      setState(() => _activeTabIndex = index);
+                      _saveState();
+                    },
+                    onClose: _closeTab,
+                    onAddTab: _addTab,
+                  ),
                 ),
-                onPressed: _togglePin,
+                actions: [
+                  IconButton(
+                    tooltip: translate('settings'),
+                    icon: const Icon(Icons.settings),
+                    onPressed: _openSettings,
+                  ),
+                  IconButton(
+                    tooltip: isDark
+                        ? translate('switch_to_light_mode')
+                        : translate('switch_to_dark_mode'),
+                    icon: Icon(isDark ? Icons.light_mode : Icons.dark_mode),
+                    onPressed: AppTheme.toggle,
+                  ),
+                  IconButton(
+                    tooltip: _isPinned
+                        ? translate('unpin_window')
+                        : translate('pin_window'),
+                    icon: Icon(
+                      _isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                    ),
+                    onPressed: _togglePin,
+                  ),
+                ],
               ),
-            ],
-          ),
-          body: Column(
-            children: [
-              Expanded(
-                child: _tabs[_activeTabIndex].path != null
-                    ? RepositoryView(
-                        key: ValueKey(_tabs[_activeTabIndex].path),
-                        path: _tabs[_activeTabIndex].path!,
-                      )
-                    : WelcomeForm(
-                        key: ValueKey(_tabs[_activeTabIndex].id),
-                        onRepositoryOpened: _setActiveTabRepository,
-                      ),
+              body: Column(
+                children: [
+                  Expanded(
+                    child: _tabs[_activeTabIndex].path != null
+                        ? RepositoryView(
+                            key: ValueKey(_tabs[_activeTabIndex].path),
+                            path: _tabs[_activeTabIndex].path!,
+                          )
+                        : WelcomeForm(
+                            key: ValueKey(_tabs[_activeTabIndex].id),
+                            onRepositoryOpened: _setActiveTabRepository,
+                          ),
+                  ),
+                  if (_tabs[_activeTabIndex].isTerminalOpen)
+                    TerminalPanel(
+                      key: ValueKey(_tabs[_activeTabIndex].id),
+                      sessions: _tabs[_activeTabIndex].terminalSessions,
+                      activeIndex: _tabs[_activeTabIndex].activeTerminalIndex,
+                      onSelect: (index) {
+                        setState(
+                          () => _tabs[_activeTabIndex].activeTerminalIndex =
+                              index,
+                        );
+                        _saveState();
+                      },
+                      onClose: _closeTerminalTab,
+                      onAddTab: _addTerminalTab,
+                    ),
+                  if (_tabs[_activeTabIndex].isLogsOpen) const LogsPanel(),
+                  BottomToolbar(
+                    isTerminalOpen: _tabs[_activeTabIndex].isTerminalOpen,
+                    onToggleTerminal: _toggleTerminal,
+                    isLogsOpen: _tabs[_activeTabIndex].isLogsOpen,
+                    onToggleLogs: _toggleLogs,
+                  ),
+                ],
               ),
-              if (_tabs[_activeTabIndex].isTerminalOpen)
-                TerminalPanel(
-                  key: ValueKey(_tabs[_activeTabIndex].id),
-                  sessions: _tabs[_activeTabIndex].terminalSessions,
-                  activeIndex: _tabs[_activeTabIndex].activeTerminalIndex,
-                  onSelect: (index) {
-                    setState(
-                      () => _tabs[_activeTabIndex].activeTerminalIndex = index,
-                    );
-                    _saveState();
-                  },
-                  onClose: _closeTerminalTab,
-                  onAddTab: _addTerminalTab,
-                ),
-              if (_tabs[_activeTabIndex].isLogsOpen)
-                const LogsPanel(),
-              BottomToolbar(
-                isTerminalOpen: _tabs[_activeTabIndex].isTerminalOpen,
-                onToggleTerminal: _toggleTerminal,
-                isLogsOpen: _tabs[_activeTabIndex].isLogsOpen,
-                onToggleLogs: _toggleLogs,
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
