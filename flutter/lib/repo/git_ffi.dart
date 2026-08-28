@@ -76,6 +76,11 @@ class GitFfi {
 
   static GitFfi? _instance;
 
+  /// Paths tried by the most recent [instanceOrNull] lookup that didn't
+  /// already have a cached instance. Populated even on success, so a
+  /// caller can report exactly where it looked when diagnosing a failure.
+  static List<String> lastAttemptedPaths = const [];
+
   /// The loaded binding, or null if the native library couldn't be found
   /// (e.g. it hasn't been built yet during development).
   static GitFfi? get instanceOrNull {
@@ -186,13 +191,18 @@ class GitFfi {
   }
 
   static DynamicLibrary? _tryLoadLibrary() {
+    final tried = <String>[];
     for (final candidate in _candidatePaths()) {
+      tried.add(candidate);
       try {
-        return DynamicLibrary.open(candidate);
+        final lib = DynamicLibrary.open(candidate);
+        lastAttemptedPaths = tried;
+        return lib;
       } on ArgumentError {
         continue;
       }
     }
+    lastAttemptedPaths = tried;
     return null;
   }
 

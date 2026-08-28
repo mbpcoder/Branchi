@@ -80,7 +80,7 @@ class GitActions {
   /// entries. Runs on a background isolate since it walks repo history.
   static Future<List<CommitEntry>> log(String path, {int limit = 200}) async {
     final ffi = GitFfi.instanceOrNull;
-    if (ffi == null) throw StateError(_missingLibraryError);
+    if (ffi == null) throw StateError(_missingLibraryErrorWithPaths());
 
     final raw = await Isolate.run(() => ffi.log(path, limit));
     return raw
@@ -92,7 +92,7 @@ class GitActions {
   /// Local and remote-tracking branches.
   static Future<List<BranchEntry>> branches(String path) async {
     final ffi = GitFfi.instanceOrNull;
-    if (ffi == null) throw StateError(_missingLibraryError);
+    if (ffi == null) throw StateError(_missingLibraryErrorWithPaths());
 
     final raw = await Isolate.run(() => ffi.branches(path));
     return raw
@@ -107,7 +107,7 @@ class GitActions {
     String commitId,
   ) async {
     final ffi = GitFfi.instanceOrNull;
-    if (ffi == null) throw StateError(_missingLibraryError);
+    if (ffi == null) throw StateError(_missingLibraryErrorWithPaths());
 
     final raw = await Isolate.run(() => ffi.commitDiff(path, commitId));
     return raw
@@ -119,4 +119,12 @@ class GitActions {
   static const _missingLibraryError =
       'rustgit_core native library not found. Build it with '
       '`cargo build -p rustgit-core` and rerun the app.';
+
+  /// [_missingLibraryError] plus the exact paths that were tried, so a
+  /// failure report says where to look instead of just "not found".
+  static String _missingLibraryErrorWithPaths() {
+    final tried = GitFfi.lastAttemptedPaths;
+    if (tried.isEmpty) return _missingLibraryError;
+    return '$_missingLibraryError\nTried:\n${tried.map((p) => '  $p').join('\n')}';
+  }
 }
