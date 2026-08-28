@@ -4,9 +4,10 @@ import 'models.dart';
 
 /// Left-hand sidebar listing local and remote branches for the open repo.
 class BranchSidebar extends StatelessWidget {
-  const BranchSidebar({super.key, required this.branches});
+  const BranchSidebar({super.key, required this.branches, this.width = 220});
 
   final List<BranchEntry> branches;
+  final double width;
 
   @override
   Widget build(BuildContext context) {
@@ -14,7 +15,7 @@ class BranchSidebar extends StatelessWidget {
     final remote = branches.where((b) => b.isRemote).toList();
 
     return Container(
-      width: 220,
+      width: width,
       decoration: BoxDecoration(
         border: Border(
           right: BorderSide(color: Theme.of(context).dividerColor),

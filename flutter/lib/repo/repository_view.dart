@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
 
 import 'branch_sidebar.dart';
+import 'column_resize_handle.dart';
 import 'commit_detail.dart';
 import 'commit_list.dart';
 import 'git_actions.dart';
 import 'models.dart';
+import 'panel_layout_store.dart';
+
+const double _defaultSidebarWidth = 220;
+const double _defaultCommitListWidth = 360;
+const double _minColumnWidth = 160;
+const double _maxColumnWidth = 640;
 
 /// The main view for an opened repository: a branch sidebar, the commit
 /// log, and a detail/diff pane for the selected commit.
@@ -29,10 +36,40 @@ class _RepositoryViewState extends State<RepositoryView> {
   String? _diffError;
   String? _selectedFilePath;
 
+  double _sidebarWidth = _defaultSidebarWidth;
+  double _commitListWidth = _defaultCommitListWidth;
+
   @override
   void initState() {
     super.initState();
     _loadRepository();
+    _loadPanelLayout();
+  }
+
+  Future<void> _loadPanelLayout() async {
+    final results = await Future.wait([
+      PanelLayoutStore.loadSidebarWidth(),
+      PanelLayoutStore.loadCommitListWidth(),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _sidebarWidth = results[0] ?? _defaultSidebarWidth;
+      _commitListWidth = results[1] ?? _defaultCommitListWidth;
+    });
+  }
+
+  void _resizeSidebar(double delta) {
+    setState(() {
+      _sidebarWidth = (_sidebarWidth + delta)
+          .clamp(_minColumnWidth, _maxColumnWidth);
+    });
+  }
+
+  void _resizeCommitList(double delta) {
+    setState(() {
+      _commitListWidth = (_commitListWidth + delta)
+          .clamp(_minColumnWidth, _maxColumnWidth);
+    });
   }
 
   @override
@@ -113,9 +150,13 @@ class _RepositoryViewState extends State<RepositoryView> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        BranchSidebar(branches: _branches),
+        BranchSidebar(branches: _branches, width: _sidebarWidth),
+        ColumnResizeHandle(
+          onDrag: _resizeSidebar,
+          onDragEnd: () => PanelLayoutStore.saveSidebarWidth(_sidebarWidth),
+        ),
         SizedBox(
-          width: 360,
+          width: _commitListWidth,
           child: DecoratedBox(
             decoration: BoxDecoration(
               border: Border(
@@ -128,6 +169,11 @@ class _RepositoryViewState extends State<RepositoryView> {
               onSelect: _selectCommit,
             ),
           ),
+        ),
+        ColumnResizeHandle(
+          onDrag: _resizeCommitList,
+          onDragEnd: () =>
+              PanelLayoutStore.saveCommitListWidth(_commitListWidth),
         ),
         Expanded(
           child: CommitDetail(
