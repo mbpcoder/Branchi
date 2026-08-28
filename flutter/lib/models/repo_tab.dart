@@ -15,4 +15,5 @@ class RepoTab {
   int nextTerminalId = 0;
   int activeTerminalIndex = 0;
   bool isTerminalOpen = false;
+  bool isLogsOpen = false;
 }

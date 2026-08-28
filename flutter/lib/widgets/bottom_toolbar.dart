@@ -2,16 +2,20 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_locale.dart';
 
-/// The thin bottom strip holding the terminal toggle button.
+/// The thin bottom strip holding the terminal and logs toggle buttons.
 class BottomToolbar extends StatelessWidget {
   const BottomToolbar({
     super.key,
     required this.isTerminalOpen,
     required this.onToggleTerminal,
+    required this.isLogsOpen,
+    required this.onToggleLogs,
   });
 
   final bool isTerminalOpen;
   final VoidCallback onToggleTerminal;
+  final bool isLogsOpen;
+  final VoidCallback onToggleLogs;
 
   @override
   Widget build(BuildContext context) {
@@ -32,6 +36,18 @@ class BottomToolbar extends StatelessWidget {
             ),
             icon: const Icon(Icons.terminal),
             onPressed: onToggleTerminal,
+          ),
+          IconButton(
+            iconSize: 18,
+            tooltip: translate('logs'),
+            isSelected: isLogsOpen,
+            style: IconButton.styleFrom(
+              padding: EdgeInsets.zero,
+              backgroundColor:
+                  isLogsOpen ? colorScheme.surface : Colors.transparent,
+            ),
+            icon: const Icon(Icons.receipt_long),
+            onPressed: onToggleLogs,
           ),
         ],
       ),
