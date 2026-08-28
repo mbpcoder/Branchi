@@ -2,7 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
-import '../l10n/translations.dart';
+import '../l10n/app_locale.dart';
 import '../repo/git_actions.dart';
 import '../repo/recent_repositories_store.dart';
 import '../widgets/form_row.dart';

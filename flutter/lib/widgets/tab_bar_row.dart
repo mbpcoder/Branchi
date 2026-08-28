@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../l10n/translations.dart';
+import '../l10n/app_locale.dart';
 import '../models/repo_tab.dart';
 
 /// The top row of repository tabs, with a trailing "add tab" button.

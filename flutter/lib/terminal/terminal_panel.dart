@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:xterm/xterm.dart';
 
-import '../l10n/translations.dart';
+import '../l10n/app_locale.dart';
 import 'terminal_session.dart';
 
 /// The bottom terminal panel: a row of terminal tabs plus the active

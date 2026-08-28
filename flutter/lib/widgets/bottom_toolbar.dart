@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../l10n/translations.dart';
+import '../l10n/app_locale.dart';
 
 /// The thin bottom strip holding the terminal toggle button.
 class BottomToolbar extends StatelessWidget {
