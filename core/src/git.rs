@@ -400,8 +400,35 @@ impl GitRepo {
             .repo
             .find_remote(remote_name)
             .with_context(|| format!("remote not found: {remote_name}"))?;
+
+        let mut callbacks = git2::RemoteCallbacks::new();
+        callbacks.credentials(|url, username_from_url, allowed_types| {
+            if allowed_types.contains(git2::CredentialType::SSH_KEY) {
+                if let Some(username) = username_from_url {
+                    if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
+                        return Ok(cred);
+                    }
+                }
+            }
+            if allowed_types.contains(git2::CredentialType::USER_PASS_PLAINTEXT)
+                || allowed_types.contains(git2::CredentialType::DEFAULT)
+            {
+                if let Ok(cred) = git2::Cred::credential_helper(
+                    &git2::Config::open_default()?,
+                    url,
+                    username_from_url,
+                ) {
+                    return Ok(cred);
+                }
+            }
+            git2::Cred::default()
+        });
+
+        let mut fetch_options = git2::FetchOptions::new();
+        fetch_options.remote_callbacks(callbacks);
+
         remote
-            .fetch(&[] as &[&str], None, None)
+            .fetch(&[] as &[&str], Some(&mut fetch_options), None)
             .with_context(|| format!("failed to fetch remote: {remote_name}"))?;
         Ok(())
     }
