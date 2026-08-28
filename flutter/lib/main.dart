@@ -60,6 +60,13 @@ class RepoTab {
   String title;
 }
 
+/// A previously opened repository shown in the "Recent Repositories" list.
+class RecentRepository {
+  const RecentRepository({required this.path});
+
+  final String path;
+}
+
 class TerminalSession {
   TerminalSession({
     required this.id,
@@ -255,18 +262,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           ),
           body: Column(
             children: [
-              Expanded(
-                child: Center(
-                  child: Text(
-                    '${translate('welcome')}\n(${_tabs[_activeTabIndex].title})',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
+              const Expanded(child: _WelcomeForm()),
               if (_isTerminalOpen)
                 _TerminalPanel(
                   sessions: _terminalSessions,
@@ -490,6 +486,208 @@ class _TabBarRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// The "start page" shown as the content of the default tab and every new
+/// tab: pick a local repository, browse recent ones, or clone a remote one.
+class _WelcomeForm extends StatefulWidget {
+  const _WelcomeForm();
+
+  @override
+  State<_WelcomeForm> createState() => _WelcomeFormState();
+}
+
+class _WelcomeFormState extends State<_WelcomeForm> {
+  final List<RecentRepository> _recentRepositories = const [];
+
+  final TextEditingController _sourceUrlController = TextEditingController();
+  final TextEditingController _repoNameController = TextEditingController();
+  final TextEditingController _destinationPathController =
+      TextEditingController();
+
+  @override
+  void dispose() {
+    _sourceUrlController.dispose();
+    _repoNameController.dispose();
+    _destinationPathController.dispose();
+    super.dispose();
+  }
+
+  void _openRepository() {
+    // TODO: wire up a native folder picker and open the chosen repository.
+  }
+
+  void _newRepository() {
+    // TODO: wire up repository creation.
+  }
+
+  Future<void> _pickDestinationPath() async {
+    // TODO: wire up a native folder picker for the clone destination.
+  }
+
+  void _cloneRepository() {
+    // TODO: wire up cloning via core::git using the form fields above.
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              translate('local_repositories'),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.tonal(
+                    onPressed: _openRepository,
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: Text(translate('open_repository')),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.tonal(
+                    onPressed: _newRepository,
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: Text(translate('new_repository')),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 32),
+            Text(
+              translate('recent_repositories'),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 12),
+            if (_recentRepositories.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  translate('no_recent_repositories'),
+                  style: TextStyle(color: colorScheme.onSurfaceVariant),
+                ),
+              )
+            else
+              ...List.generate(_recentRepositories.length, (index) {
+                final repo = _recentRepositories[index];
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: InkWell(
+                    onTap: () {
+                      // TODO: open this recent repository.
+                    },
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.folder,
+                          size: 20,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(repo.path)),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            const SizedBox(height: 32),
+            Text(
+              translate('clone_repository'),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 16),
+            _FormRow(
+              label: translate('source_url'),
+              child: TextField(
+                controller: _sourceUrlController,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _FormRow(
+              label: translate('repository_name'),
+              child: TextField(
+                controller: _repoNameController,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _FormRow(
+              label: translate('destination_path'),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _destinationPathController,
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton(
+                    onPressed: _pickDestinationPath,
+                    child: const Text('...'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(
+                onPressed: _cloneRepository,
+                child: Text(translate('clone')),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A label + input row used by the clone-repository form.
+class _FormRow extends StatelessWidget {
+  const _FormRow({required this.label, required this.child});
+
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        SizedBox(
+          width: 140,
+          child: Text(label),
+        ),
+        Expanded(child: child),
+      ],
     );
   }
 }
