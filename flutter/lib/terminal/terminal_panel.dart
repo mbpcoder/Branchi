@@ -7,7 +7,7 @@ import 'terminal_session.dart';
 
 /// The bottom terminal panel: a row of terminal tabs plus the active
 /// session's [TerminalView].
-class TerminalPanel extends StatelessWidget {
+class TerminalPanel extends StatefulWidget {
   const TerminalPanel({
     super.key,
     required this.sessions,
@@ -26,6 +26,54 @@ class TerminalPanel extends StatelessWidget {
   final VoidCallback onAddTab;
   final double height;
   final ValueChanged<double> onHeightChanged;
+
+  @override
+  State<TerminalPanel> createState() => _TerminalPanelState();
+}
+
+class _TerminalPanelState extends State<TerminalPanel> {
+  final FocusNode _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _requestFocus();
+  }
+
+  @override
+  void didUpdateWidget(covariant TerminalPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.sessions.isNotEmpty &&
+        (oldWidget.activeIndex != widget.activeIndex ||
+            oldWidget.sessions.length != widget.sessions.length)) {
+      _requestFocus();
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  /// Explicitly grabs keyboard focus once the terminal has finished
+  /// building. `autofocus` alone isn't enough here: the toolbar button
+  /// that opens/switches the terminal already holds focus from the tap
+  /// that triggered this rebuild, and Flutter's autofocus only applies
+  /// when nothing in the scope currently has focus.
+  void _requestFocus() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
+  }
+
+  List<TerminalSession> get sessions => widget.sessions;
+  int get activeIndex => widget.activeIndex;
+  ValueChanged<int> get onSelect => widget.onSelect;
+  ValueChanged<int> get onClose => widget.onClose;
+  VoidCallback get onAddTab => widget.onAddTab;
+  double get height => widget.height;
+  ValueChanged<double> get onHeightChanged => widget.onHeightChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -105,10 +153,14 @@ class TerminalPanel extends StatelessWidget {
               Expanded(
                 child: sessions.isEmpty
                     ? const SizedBox.shrink()
-                    : TerminalView(
-                        key: ValueKey(sessions[activeIndex].id),
-                        sessions[activeIndex].terminal,
-                        autofocus: true,
+                    : GestureDetector(
+                        onTap: () => _focusNode.requestFocus(),
+                        child: TerminalView(
+                          key: ValueKey(sessions[activeIndex].id),
+                          sessions[activeIndex].terminal,
+                          focusNode: _focusNode,
+                          autofocus: true,
+                        ),
                       ),
               ),
             ],
