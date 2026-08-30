@@ -1,0 +1,53 @@
+name: Windows release build
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build native library (rustgit_core.dll)
+        run: cargo build --release -p rustgit-core
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Ensure Windows platform scaffolding exists
+        working-directory: flutter
+        run: |
+          if (-not (Test-Path "windows")) {
+            flutter create --platforms=windows .
+          }
+
+      - name: Install Flutter dependencies
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Build Flutter Windows app
+        working-directory: flutter
+        run: flutter build windows --release
+
+      - name: Bundle native library with the app
+        run: Copy-Item target\release\rustgit_core.dll flutter\build\windows\x64\runner\Release\rustgit_core.dll
+
+      - name: Package release archive
+        run: Compress-Archive -Path flutter\build\windows\x64\runner\Release\* -DestinationPath rustgit-windows.zip
+
+      - name: Create release and upload artifact
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "windows-build-$($env:GITHUB_RUN_NUMBER)"
+          gh release create $tag rustgit-windows.zip `
+            --title "RustGit Windows build $($env:GITHUB_RUN_NUMBER)" `
+            --notes "Automated Windows build from commit $($env:GITHUB_SHA)."
