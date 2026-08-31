@@ -1,3 +1,7 @@
+import 'package:flutter/widgets.dart';
+
+import '../repo/models.dart';
+import '../repo/repository_view.dart';
 import '../terminal/terminal_session.dart';
 
 /// A single tab in the top tab bar: either an unattached "start page" tab
@@ -18,4 +22,16 @@ class RepoTab {
   bool isLogsOpen = false;
   double terminalHeight = 200;
   double logsHeight = 200;
+
+  /// Key onto this tab's [RepositoryView], used to drive imperative actions
+  /// (e.g. checking out a branch) from the bottom bar.
+  final GlobalKey<RepositoryViewState> repositoryViewKey = GlobalKey();
+
+  /// The active editor tab's detected file type, shown in the bottom bar.
+  String? fileTypeLabel;
+
+  /// The repository's current (HEAD) branch, and the full branch list, kept
+  /// in sync from [RepositoryView] for the bottom bar's branch switcher.
+  String? currentBranch;
+  List<BranchEntry> branches = const [];
 }

@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 
 import '../code/code_view.dart';
 import 'branch_sidebar.dart';
+import 'branch_watch_store.dart';
 import 'column_resize_handle.dart';
 import 'commit_detail.dart';
 import 'commit_list.dart';
@@ -22,15 +23,30 @@ const double _maxColumnWidth = 640;
 /// The main view for an opened repository: a branch sidebar, the commit
 /// log, and a detail/diff pane for the selected commit.
 class RepositoryView extends StatefulWidget {
-  const RepositoryView({super.key, required this.path});
+  const RepositoryView({
+    super.key,
+    required this.path,
+    this.onLanguageChanged,
+    this.onBranchInfoChanged,
+  });
 
   final String path;
 
+  /// Forwarded to the Code tab so the app's bottom bar can show the active
+  /// file's detected type.
+  final ValueChanged<String?>? onLanguageChanged;
+
+  /// Called whenever the branch list or current (HEAD) branch changes, so
+  /// the app's bottom bar can show/update the current branch and offer a
+  /// quick-switch dropdown.
+  final void Function(String? headBranch, List<BranchEntry> branches)?
+      onBranchInfoChanged;
+
   @override
-  State<RepositoryView> createState() => _RepositoryViewState();
+  State<RepositoryView> createState() => RepositoryViewState();
 }
 
-class _RepositoryViewState extends State<RepositoryView> {
+class RepositoryViewState extends State<RepositoryView> {
   List<CommitEntry> _commits = [];
   List<BranchEntry> _branches = [];
   bool _isLoading = true;
@@ -53,11 +69,96 @@ class _RepositoryViewState extends State<RepositoryView> {
   RepoViewMode _mode = RepoViewMode.git;
   final GlobalKey<CodeViewState> _codeViewKey = GlobalKey();
 
+  // Auto-refresh ("watch") of the current branch. Owned here, rather than by
+  // the branch sidebar, so it keeps running even while the Code tab is open
+  // and the sidebar isn't mounted.
+  int? _watchIntervalMinutes;
+  Timer? _watchTimer;
+  bool _isUpdatingCurrentBranch = false;
+
   @override
   void initState() {
     super.initState();
     _loadRepository();
     _loadPanelLayout();
+    _loadWatchInterval();
+  }
+
+  @override
+  void didUpdateWidget(covariant RepositoryView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.path != widget.path) {
+      _selectedCommit = null;
+      _diffFiles = [];
+      _selectedFilePath = null;
+      _loadRepository();
+      _loadWatchInterval();
+    }
+  }
+
+  @override
+  void dispose() {
+    _watchTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadWatchInterval() async {
+    final repoPath = widget.path;
+    final minutes = await BranchWatchStore.loadIntervalMinutes(repoPath);
+    if (!mounted || repoPath != widget.path) return;
+    setState(() => _watchIntervalMinutes = minutes);
+    _restartWatchTimer();
+  }
+
+  void _restartWatchTimer() {
+    _watchTimer?.cancel();
+    final minutes = _watchIntervalMinutes;
+    if (minutes == null) return;
+    _watchTimer = Timer.periodic(Duration(minutes: minutes), (_) {
+      _updateCurrentBranch();
+    });
+  }
+
+  void _setWatchInterval(int? minutes) {
+    if (minutes == _watchIntervalMinutes) return;
+    setState(() => _watchIntervalMinutes = minutes);
+    _restartWatchTimer();
+    BranchWatchStore.saveIntervalMinutes(widget.path, minutes);
+  }
+
+  Future<void> _updateCurrentBranch() async {
+    if (_isUpdatingCurrentBranch) return;
+    BranchEntry? head;
+    for (final branch in _branches) {
+      if (branch.isHead) {
+        head = branch;
+        break;
+      }
+    }
+    if (head == null) return;
+    setState(() => _isUpdatingCurrentBranch = true);
+    try {
+      await GitActions.updateBranch(
+        widget.path,
+        head.name,
+        isRemote: head.isRemote,
+      );
+      if (!mounted) return;
+      await _loadRepository();
+    } finally {
+      if (mounted) setState(() => _isUpdatingCurrentBranch = false);
+    }
+  }
+
+  /// Checks out [branchName], e.g. from the bottom bar's branch switcher.
+  Future<void> checkoutBranch(String branchName) async {
+    final result = await GitActions.checkoutBranch(widget.path, branchName);
+    if (!mounted) return;
+    if (result.isSuccess) {
+      await _loadRepository();
+    } else {
+      _showError(result.error!);
+    }
   }
 
   Future<void> _loadPanelLayout() async {
@@ -86,17 +187,6 @@ class _RepositoryViewState extends State<RepositoryView> {
     });
   }
 
-  @override
-  void didUpdateWidget(covariant RepositoryView oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.path != widget.path) {
-      _selectedCommit = null;
-      _diffFiles = [];
-      _selectedFilePath = null;
-      _loadRepository();
-    }
-  }
-
   Future<void> _loadRepository() async {
     setState(() {
       _isLoading = true;
@@ -114,6 +204,7 @@ class _RepositoryViewState extends State<RepositoryView> {
         _branches = results[1] as List<BranchEntry>;
         _isLoading = false;
       });
+      _notifyBranchInfo();
       unawaited(_loadStatus());
       if (_commits.isNotEmpty && !_isViewingChanges) {
         _selectCommit(_commits.first);
@@ -125,6 +216,17 @@ class _RepositoryViewState extends State<RepositoryView> {
         _loadError = error.toString();
       });
     }
+  }
+
+  void _notifyBranchInfo() {
+    String? head;
+    for (final branch in _branches) {
+      if (!branch.isRemote && branch.isHead) {
+        head = branch.name;
+        break;
+      }
+    }
+    widget.onBranchInfoChanged?.call(head, _branches);
   }
 
   Future<void> _loadStatus() async {
@@ -153,6 +255,7 @@ class _RepositoryViewState extends State<RepositoryView> {
       _isViewingChanges = true;
       _selectedCommit = null;
     });
+    unawaited(_loadStatus());
   }
 
   Future<bool> _stage(StatusEntry entry) async {
@@ -300,11 +403,18 @@ class _RepositoryViewState extends State<RepositoryView> {
       children: [
         ModeRail(
           mode: _mode,
-          onChanged: (mode) => setState(() => _mode = mode),
+          onChanged: (mode) {
+            setState(() => _mode = mode);
+            if (mode != RepoViewMode.code) widget.onLanguageChanged?.call(null);
+          },
         ),
         if (_mode == RepoViewMode.code)
           Expanded(
-            child: CodeView(key: _codeViewKey, repoPath: widget.path),
+            child: CodeView(
+              key: _codeViewKey,
+              repoPath: widget.path,
+              onLanguageChanged: widget.onLanguageChanged,
+            ),
           )
         else
           Expanded(child: _buildGitView(context)),
@@ -321,6 +431,10 @@ class _RepositoryViewState extends State<RepositoryView> {
           branches: _branches,
           width: _sidebarWidth,
           onChanged: _loadRepository,
+          watchIntervalMinutes: _watchIntervalMinutes,
+          onWatchIntervalChanged: _setWatchInterval,
+          isUpdatingCurrentBranch: _isUpdatingCurrentBranch,
+          onUpdateCurrentBranch: _updateCurrentBranch,
         ),
         ColumnResizeHandle(
           onDrag: _resizeSidebar,
@@ -372,6 +486,7 @@ class _RepositoryViewState extends State<RepositoryView> {
                   onCommit: _commit,
                   onCommitAndPush: _commitAndPush,
                   onOpenFile: (entry) => _openFileInEditor(entry.path),
+                  onRefresh: () => unawaited(_loadStatus()),
                 )
               : CommitDetail(
                   commit: _selectedCommit,

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'models.dart';
 
 /// Middle pane: the commit log for the open repo, newest first.
-class CommitList extends StatelessWidget {
+class CommitList extends StatefulWidget {
   const CommitList({
     super.key,
     required this.commits,
@@ -16,22 +16,84 @@ class CommitList extends StatelessWidget {
   final ValueChanged<CommitEntry> onSelect;
 
   @override
-  Widget build(BuildContext context) {
-    if (commits.isEmpty) {
-      return const Center(child: Text('No commits yet'));
-    }
+  State<CommitList> createState() => _CommitListState();
+}
 
-    return ListView.builder(
-      itemCount: commits.length,
-      itemBuilder: (context, index) {
-        final commit = commits[index];
-        final selected = commit.id == selectedId;
-        return _CommitTile(
-          commit: commit,
-          selected: selected,
-          onTap: () => onSelect(commit),
-        );
-      },
+class _CommitListState extends State<CommitList> {
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<CommitEntry> get _filteredCommits {
+    final query = _query.trim().toLowerCase();
+    if (query.isEmpty) return widget.commits;
+    return widget.commits.where((commit) {
+      return commit.summary.toLowerCase().contains(query) ||
+          commit.id.toLowerCase().contains(query) ||
+          commit.author.toLowerCase().contains(query);
+    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final commits = _filteredCommits;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          child: TextField(
+            controller: _searchController,
+            onChanged: (value) => setState(() => _query = value),
+            decoration: InputDecoration(
+              hintText: 'Search commit message or hash',
+              prefixIcon: const Icon(Icons.search, size: 20),
+              isDense: true,
+              suffixIcon: _query.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.clear, size: 18),
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() => _query = '');
+                      },
+                    ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+          ),
+        ),
+        Expanded(
+          child: commits.isEmpty
+              ? Center(
+                  child: Text(
+                    widget.commits.isEmpty
+                        ? 'No commits yet'
+                        : 'No commits match your search',
+                  ),
+                )
+              : ListView.builder(
+                  itemCount: commits.length,
+                  itemBuilder: (context, index) {
+                    final commit = commits[index];
+                    final selected = commit.id == widget.selectedId;
+                    return _CommitTile(
+                      commit: commit,
+                      selected: selected,
+                      onTap: () => widget.onSelect(commit),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }

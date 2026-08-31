@@ -52,7 +52,12 @@ Future<String?> _findOnPath(String executable) async {
     final lines = (result.stdout as String)
         .split(RegExp(r'\r?\n'))
         .map((line) => line.trim())
-        .where((line) => line.isNotEmpty);
+        .where((line) => line.isNotEmpty)
+        // Windows puts non-functional "App Execution Alias" stubs for
+        // uninstalled apps on PATH under WindowsApps (e.g. a pwsh.exe
+        // placeholder that just opens the Store instead of a shell).
+        // Skip them so we don't report an app as installed when it isn't.
+        .where((line) => !line.contains(r'\AppData\Local\Microsoft\WindowsApps\'));
     return lines.isEmpty ? null : lines.first;
   } catch (_) {
     // `where`/`which` themselves missing, or the process couldn't start.
