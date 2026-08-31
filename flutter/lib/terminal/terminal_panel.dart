@@ -160,6 +160,13 @@ class _TerminalPanelState extends State<TerminalPanel> {
                           sessions[activeIndex].terminal,
                           focusNode: _focusNode,
                           autofocus: true,
+                          // This is a desktop-only terminal, so keystrokes
+                          // should always come from the hardware keyboard.
+                          // Routing through the platform IME/text-input
+                          // connection instead is what causes input to stop
+                          // working after certain keys (e.g. Enter) on some
+                          // platforms.
+                          hardwareKeyboardOnly: true,
                         ),
                       ),
               ),
