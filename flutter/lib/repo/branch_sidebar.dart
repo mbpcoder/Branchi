@@ -44,6 +44,7 @@ class _BranchSidebarState extends State<BranchSidebar> {
 
   int? _watchIntervalMinutes;
   Timer? _watchTimer;
+  bool _isUpdatingCurrentBranch = false;
 
   @override
   void initState() {
@@ -83,6 +84,7 @@ class _BranchSidebarState extends State<BranchSidebar> {
   }
 
   Future<void> _updateCurrentBranch() async {
+    if (_isUpdatingCurrentBranch) return;
     BranchEntry? head;
     for (final branch in widget.branches) {
       if (branch.isHead) {
@@ -91,13 +93,18 @@ class _BranchSidebarState extends State<BranchSidebar> {
       }
     }
     if (head == null) return;
-    await GitActions.updateBranch(
-      widget.repoPath,
-      head.name,
-      isRemote: head.isRemote,
-    );
-    if (!mounted) return;
-    widget.onChanged();
+    setState(() => _isUpdatingCurrentBranch = true);
+    try {
+      await GitActions.updateBranch(
+        widget.repoPath,
+        head.name,
+        isRemote: head.isRemote,
+      );
+      if (!mounted) return;
+      widget.onChanged();
+    } finally {
+      if (mounted) setState(() => _isUpdatingCurrentBranch = false);
+    }
   }
 
   // Dismissing the menu without picking anything also resolves to `null`
@@ -330,12 +337,23 @@ class _BranchSidebarState extends State<BranchSidebar> {
                   iconSize: 16,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
-                  tooltip: 'Update current branch',
-                  icon: Icon(
-                    Icons.refresh,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  onPressed: _updateCurrentBranch,
+                  tooltip: _isUpdatingCurrentBranch
+                      ? 'Pulling…'
+                      : 'Update current branch',
+                  icon: _isUpdatingCurrentBranch
+                      ? SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                        )
+                      : Icon(
+                          Icons.refresh,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  onPressed: _isUpdatingCurrentBranch ? null : _updateCurrentBranch,
                 ),
                 const SizedBox(width: 4),
                 Builder(
