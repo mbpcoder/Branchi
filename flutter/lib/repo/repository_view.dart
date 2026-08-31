@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'branch_sidebar.dart';
@@ -7,6 +9,7 @@ import 'commit_list.dart';
 import 'git_actions.dart';
 import 'models.dart';
 import 'panel_layout_store.dart';
+import 'working_changes_panel.dart';
 
 const double _defaultSidebarWidth = 220;
 const double _defaultCommitListWidth = 360;
@@ -35,6 +38,11 @@ class _RepositoryViewState extends State<RepositoryView> {
   bool _isDiffLoading = false;
   String? _diffError;
   String? _selectedFilePath;
+
+  List<StatusEntry> _status = [];
+  bool _isStatusLoading = false;
+  String? _statusError;
+  bool _isViewingChanges = false;
 
   double _sidebarWidth = _defaultSidebarWidth;
   double _commitListWidth = _defaultCommitListWidth;
@@ -100,7 +108,8 @@ class _RepositoryViewState extends State<RepositoryView> {
         _branches = results[1] as List<BranchEntry>;
         _isLoading = false;
       });
-      if (_commits.isNotEmpty) {
+      unawaited(_loadStatus());
+      if (_commits.isNotEmpty && !_isViewingChanges) {
         _selectCommit(_commits.first);
       }
     } catch (error) {
@@ -112,8 +121,131 @@ class _RepositoryViewState extends State<RepositoryView> {
     }
   }
 
+  Future<void> _loadStatus() async {
+    setState(() {
+      _isStatusLoading = true;
+      _statusError = null;
+    });
+    try {
+      final status = await GitActions.status(widget.path);
+      if (!mounted) return;
+      setState(() {
+        _status = status;
+        _isStatusLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isStatusLoading = false;
+        _statusError = error.toString();
+      });
+    }
+  }
+
+  void _selectWorkingChanges() {
+    setState(() {
+      _isViewingChanges = true;
+      _selectedCommit = null;
+    });
+  }
+
+  Future<bool> _stage(StatusEntry entry) async {
+    final result = await GitActions.stage(widget.path, entry.path);
+    if (!mounted) return false;
+    if (result.isSuccess) {
+      await _loadStatus();
+    } else {
+      _showError(result.error!);
+    }
+    return result.isSuccess;
+  }
+
+  Future<bool> _unstage(StatusEntry entry) async {
+    final result = await GitActions.unstage(widget.path, entry.path);
+    if (!mounted) return false;
+    if (result.isSuccess) {
+      await _loadStatus();
+    } else {
+      _showError(result.error!);
+    }
+    return result.isSuccess;
+  }
+
+  Future<bool> _revertFile(StatusEntry entry) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Revert file?'),
+        content: Text(
+          'This discards uncommitted working-tree changes to '
+          '"${entry.path}". This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Revert'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return false;
+
+    final result = await GitActions.revertFile(widget.path, entry.path);
+    if (!mounted) return false;
+    if (result.isSuccess) {
+      await _loadStatus();
+    } else {
+      _showError(result.error!);
+    }
+    return result.isSuccess;
+  }
+
+  Future<bool> _commit(String message) async {
+    final result = await GitActions.commit(widget.path, message);
+    if (!mounted) return false;
+    if (result.isSuccess) {
+      await Future.wait([_loadStatus(), _loadRepository()]);
+    } else {
+      _showError(result.error!);
+    }
+    return result.isSuccess;
+  }
+
+  Future<bool> _commitAndPush(String message) async {
+    final committed = await _commit(message);
+    if (!committed || !mounted) return committed;
+
+    String? headBranch;
+    for (final branch in _branches) {
+      if (!branch.isRemote && branch.isHead) {
+        headBranch = branch.name;
+        break;
+      }
+    }
+    if (headBranch == null) {
+      _showError('No current branch to push.');
+      return true;
+    }
+
+    final result = await GitActions.push(widget.path, headBranch);
+    if (!mounted) return true;
+    if (!result.isSuccess) {
+      _showError(result.error!);
+    }
+    return true;
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _selectCommit(CommitEntry commit) async {
     setState(() {
+      _isViewingChanges = false;
       _selectedCommit = commit;
       _diffFiles = [];
       _selectedFilePath = null;
@@ -168,10 +300,23 @@ class _RepositoryViewState extends State<RepositoryView> {
                 right: BorderSide(color: Theme.of(context).dividerColor),
               ),
             ),
-            child: CommitList(
-              commits: _commits,
-              selectedId: _selectedCommit?.id,
-              onSelect: _selectCommit,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                WorkingChangesBar(
+                  status: _status,
+                  selected: _isViewingChanges,
+                  onTap: _selectWorkingChanges,
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: CommitList(
+                    commits: _commits,
+                    selectedId: _isViewingChanges ? null : _selectedCommit?.id,
+                    onSelect: _selectCommit,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -181,14 +326,27 @@ class _RepositoryViewState extends State<RepositoryView> {
               PanelLayoutStore.saveCommitListWidth(_commitListWidth),
         ),
         Expanded(
-          child: CommitDetail(
-            commit: _selectedCommit,
-            diffFiles: _diffFiles,
-            isLoading: _isDiffLoading,
-            error: _diffError,
-            selectedFilePath: _selectedFilePath,
-            onSelectFile: (path) => setState(() => _selectedFilePath = path),
-          ),
+          child: _isViewingChanges
+              ? WorkingChangesDetail(
+                  status: _status,
+                  isLoading: _isStatusLoading,
+                  error: _statusError,
+                  canPush: _branches.any((b) => !b.isRemote && b.isHead),
+                  onStage: _stage,
+                  onUnstage: _unstage,
+                  onRevert: _revertFile,
+                  onCommit: _commit,
+                  onCommitAndPush: _commitAndPush,
+                )
+              : CommitDetail(
+                  commit: _selectedCommit,
+                  diffFiles: _diffFiles,
+                  isLoading: _isDiffLoading,
+                  error: _diffError,
+                  selectedFilePath: _selectedFilePath,
+                  onSelectFile: (path) =>
+                      setState(() => _selectedFilePath = path),
+                ),
         ),
       ],
     );

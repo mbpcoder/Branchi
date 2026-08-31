@@ -88,6 +88,54 @@ typedef _UpdateBranchDart = Pointer<Utf8> Function(
   bool isRemote,
 );
 
+typedef _StatusNative = Pointer<Utf8> Function(Pointer<Utf8> path);
+typedef _StatusDart = Pointer<Utf8> Function(Pointer<Utf8> path);
+
+typedef _StageNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> filePath,
+);
+typedef _StageDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> filePath,
+);
+
+typedef _UnstageNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> filePath,
+);
+typedef _UnstageDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> filePath,
+);
+
+typedef _RevertFileNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> filePath,
+);
+typedef _RevertFileDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> filePath,
+);
+
+typedef _CommitNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> message,
+);
+typedef _CommitDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> message,
+);
+
+typedef _PushNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+);
+typedef _PushDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+);
+
 typedef _FreeStringNative = Void Function(Pointer<Utf8> ptr);
 typedef _FreeStringDart = void Function(Pointer<Utf8> ptr);
 
@@ -128,6 +176,20 @@ class GitFfi {
             lib.lookupFunction<_UpdateBranchNative, _UpdateBranchDart>(
           'rustgit_update_branch',
         ),
+        _status =
+            lib.lookupFunction<_StatusNative, _StatusDart>('rustgit_status'),
+        _stage =
+            lib.lookupFunction<_StageNative, _StageDart>('rustgit_stage'),
+        _unstage = lib.lookupFunction<_UnstageNative, _UnstageDart>(
+          'rustgit_unstage',
+        ),
+        _revertFile =
+            lib.lookupFunction<_RevertFileNative, _RevertFileDart>(
+          'rustgit_revert_file',
+        ),
+        _commit =
+            lib.lookupFunction<_CommitNative, _CommitDart>('rustgit_commit'),
+        _push = lib.lookupFunction<_PushNative, _PushDart>('rustgit_push'),
         _freeString = lib.lookupFunction<_FreeStringNative, _FreeStringDart>(
           'rustgit_free_string',
         );
@@ -158,6 +220,12 @@ class GitFfi {
   final _CreateBranchDart _createBranch;
   final _DeleteBranchDart _deleteBranch;
   final _UpdateBranchDart _updateBranch;
+  final _StatusDart _status;
+  final _StageDart _stage;
+  final _UnstageDart _unstage;
+  final _RevertFileDart _revertFile;
+  final _CommitDart _commit;
+  final _PushDart _push;
   final _FreeStringDart _freeString;
 
   /// Runs `git init` at [path] via the Rust core. Returns null on success,
@@ -296,6 +364,83 @@ class GitFfi {
     }
   }
 
+  /// Working-tree/index status of every changed file, as raw decoded JSON
+  /// list entries. Throws a [GitFfiException] on failure.
+  List<dynamic> status(String path) {
+    final pathPtr = path.toNativeUtf8();
+    try {
+      return _consumeJsonList(_status(pathPtr));
+    } finally {
+      malloc.free(pathPtr);
+    }
+  }
+
+  /// Stages [filePath]. Returns null on success, or an error message on
+  /// failure.
+  String? stage(String path, String filePath) {
+    final pathPtr = path.toNativeUtf8();
+    final filePathPtr = filePath.toNativeUtf8();
+    try {
+      return _consumeError(_stage(pathPtr, filePathPtr));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(filePathPtr);
+    }
+  }
+
+  /// Unstages [filePath], leaving the working tree unchanged. Returns null
+  /// on success, or an error message on failure.
+  String? unstage(String path, String filePath) {
+    final pathPtr = path.toNativeUtf8();
+    final filePathPtr = filePath.toNativeUtf8();
+    try {
+      return _consumeError(_unstage(pathPtr, filePathPtr));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(filePathPtr);
+    }
+  }
+
+  /// Discards working-tree changes to [filePath]. Returns null on success,
+  /// or an error message on failure.
+  String? revertFile(String path, String filePath) {
+    final pathPtr = path.toNativeUtf8();
+    final filePathPtr = filePath.toNativeUtf8();
+    try {
+      return _consumeError(_revertFile(pathPtr, filePathPtr));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(filePathPtr);
+    }
+  }
+
+  /// Commits the current index with [message], using the repository's
+  /// configured `user.name`/`user.email`. Returns the new commit id. Throws
+  /// a [GitFfiException] on failure.
+  String commit(String path, String message) {
+    final pathPtr = path.toNativeUtf8();
+    final messagePtr = message.toNativeUtf8();
+    try {
+      return _consumeJsonString(_commit(pathPtr, messagePtr));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(messagePtr);
+    }
+  }
+
+  /// Pushes local branch [name] to its upstream remote. Returns null on
+  /// success, or an error message on failure.
+  String? push(String path, String name) {
+    final pathPtr = path.toNativeUtf8();
+    final namePtr = name.toNativeUtf8();
+    try {
+      return _consumeError(_push(pathPtr, namePtr));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(namePtr);
+    }
+  }
+
   /// Decodes a `{"ok": [...]}` / `{"error": "..."}` response, freeing the
   /// native string in the process.
   List<dynamic> _consumeJsonList(Pointer<Utf8> resultPtr) {
@@ -307,6 +452,19 @@ class GitFfi {
       throw GitFfiException(decoded['error'] as String);
     }
     return decoded['ok'] as List<dynamic>;
+  }
+
+  /// Decodes a `{"ok": <string>}` / `{"error": "..."}` response, freeing the
+  /// native string in the process.
+  String _consumeJsonString(Pointer<Utf8> resultPtr) {
+    final text = resultPtr.toDartString();
+    _freeString(resultPtr);
+
+    final decoded = jsonDecode(text) as Map<String, dynamic>;
+    if (decoded.containsKey('error')) {
+      throw GitFfiException(decoded['error'] as String);
+    }
+    return decoded['ok'] as String;
   }
 
   static DynamicLibrary? _tryLoadLibrary() {

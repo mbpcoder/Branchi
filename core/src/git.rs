@@ -24,7 +24,7 @@ pub enum FileStatus {
     Conflicted,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct StatusEntry {
     pub path: String,
     pub staged: Option<FileStatus>,
@@ -402,27 +402,7 @@ impl GitRepo {
             .with_context(|| format!("remote not found: {remote_name}"))?;
 
         let mut callbacks = git2::RemoteCallbacks::new();
-        callbacks.credentials(|url, username_from_url, allowed_types| {
-            if allowed_types.contains(git2::CredentialType::SSH_KEY) {
-                if let Some(username) = username_from_url {
-                    if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
-                        return Ok(cred);
-                    }
-                }
-            }
-            if allowed_types.contains(git2::CredentialType::USER_PASS_PLAINTEXT)
-                || allowed_types.contains(git2::CredentialType::DEFAULT)
-            {
-                if let Ok(cred) = git2::Cred::credential_helper(
-                    &git2::Config::open_default()?,
-                    url,
-                    username_from_url,
-                ) {
-                    return Ok(cred);
-                }
-            }
-            git2::Cred::default()
-        });
+        callbacks.credentials(Self::credentials_callback);
 
         let mut fetch_options = git2::FetchOptions::new();
         fetch_options.remote_callbacks(callbacks);
@@ -492,6 +472,92 @@ impl GitRepo {
         Ok(())
     }
 
+    /// Discards working-tree changes to `path`, restoring it to the version
+    /// in the index (equivalent to `git checkout -- <path>`). If `path` is
+    /// untracked (not in the index), this removes the file instead.
+    pub fn revert_file(&self, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
+        let mut builder = git2::build::CheckoutBuilder::new();
+        builder.force();
+        builder.path(path);
+        builder.remove_untracked(true);
+        self.repo
+            .checkout_index(None, Some(&mut builder))
+            .with_context(|| format!("failed to revert file: {}", path.display()))?;
+        Ok(())
+    }
+
+    /// Pushes local branch `name` to its upstream remote. Fails if the
+    /// branch has no upstream configured.
+    pub fn push(&self, name: &str) -> Result<()> {
+        let branch = self
+            .repo
+            .find_branch(name, git2::BranchType::Local)
+            .with_context(|| format!("local branch not found: {name}"))?;
+        let upstream = branch
+            .upstream()
+            .with_context(|| format!("branch '{name}' has no upstream to push to"))?;
+        let upstream_name = upstream
+            .name()?
+            .context("upstream branch has no name")?
+            .to_string();
+        let remote_name = upstream_name
+            .split('/')
+            .next()
+            .filter(|s| !s.is_empty())
+            .with_context(|| format!("invalid upstream branch name: {upstream_name}"))?
+            .to_string();
+
+        let refname = branch
+            .get()
+            .name()
+            .context("branch reference has no name")?
+            .to_string();
+
+        let mut remote = self
+            .repo
+            .find_remote(&remote_name)
+            .with_context(|| format!("remote not found: {remote_name}"))?;
+
+        let mut callbacks = git2::RemoteCallbacks::new();
+        callbacks.credentials(Self::credentials_callback);
+
+        let mut push_options = git2::PushOptions::new();
+        push_options.remote_callbacks(callbacks);
+
+        let refspec = format!("{refname}:{refname}");
+        remote
+            .push(&[refspec.as_str()], Some(&mut push_options))
+            .with_context(|| format!("failed to push branch: {name}"))?;
+        Ok(())
+    }
+
+    fn credentials_callback(
+        url: &str,
+        username_from_url: Option<&str>,
+        allowed_types: git2::CredentialType,
+    ) -> std::result::Result<git2::Cred, git2::Error> {
+        if allowed_types.contains(git2::CredentialType::SSH_KEY) {
+            if let Some(username) = username_from_url {
+                if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
+                    return Ok(cred);
+                }
+            }
+        }
+        if allowed_types.contains(git2::CredentialType::USER_PASS_PLAINTEXT)
+            || allowed_types.contains(git2::CredentialType::DEFAULT)
+        {
+            if let Ok(cred) = git2::Cred::credential_helper(
+                &git2::Config::open_default()?,
+                url,
+                username_from_url,
+            ) {
+                return Ok(cred);
+            }
+        }
+        git2::Cred::default()
+    }
+
     /// Commit the current index with the given message, using `name`/`email`
     /// as both author and committer. Returns the new commit's id.
     pub fn commit(&self, message: &str, name: &str, email: &str) -> Result<String> {
@@ -499,6 +565,34 @@ impl GitRepo {
         let tree_id = index.write_tree()?;
         let tree = self.repo.find_tree(tree_id)?;
         let signature = git2::Signature::now(name, email)?;
+
+        let parent = self.repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+        let parents: Vec<&git2::Commit> = parent.iter().collect();
+
+        let oid = self.repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            message,
+            &tree,
+            &parents,
+        )?;
+
+        Ok(oid.to_string())
+    }
+
+    /// Commit the current index with the given message, using the
+    /// repository's configured `user.name`/`user.email` (from local or
+    /// global git config) as both author and committer. Returns the new
+    /// commit's id.
+    pub fn commit_with_configured_identity(&self, message: &str) -> Result<String> {
+        let mut index = self.repo.index()?;
+        let tree_id = index.write_tree()?;
+        let tree = self.repo.find_tree(tree_id)?;
+        let signature = self
+            .repo
+            .signature()
+            .context("no user.name/user.email configured for this repository")?;
 
         let parent = self.repo.head().ok().and_then(|h| h.peel_to_commit().ok());
         let parents: Vec<&git2::Commit> = parent.iter().collect();
@@ -689,6 +783,47 @@ mod tests {
 
         let branches = local_repo.branches().unwrap();
         assert!(branches.iter().any(|b| b.name == "feature" && !b.is_remote));
+    }
+
+    #[test]
+    fn revert_file_discards_working_tree_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        repo.commit("init", "Test User", "test@example.com").unwrap();
+
+        write_file(dir.path(), "a.txt", "two");
+        assert_eq!(
+            repo.status().unwrap()[0].unstaged,
+            Some(FileStatus::Modified)
+        );
+
+        repo.revert_file("a.txt").unwrap();
+
+        assert!(repo.status().unwrap().is_empty());
+        assert_eq!(fs::read_to_string(dir.path().join("a.txt")).unwrap(), "one");
+    }
+
+    #[test]
+    fn commit_with_configured_identity_uses_repo_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        {
+            let mut config = repo.repo.config().unwrap();
+            config.set_str("user.name", "Configured User").unwrap();
+            config.set_str("user.email", "configured@example.com").unwrap();
+        }
+
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        let commit_id = repo.commit_with_configured_identity("init").unwrap();
+        assert!(!commit_id.is_empty());
+
+        let log = repo.log(10).unwrap();
+        assert_eq!(log[0].author, "Configured User");
+        assert_eq!(log[0].email, "configured@example.com");
     }
 
     #[test]
