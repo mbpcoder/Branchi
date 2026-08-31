@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'file_explorer.dart';
 import 'git_actions.dart';
 import 'models.dart';
 import 'remotes_dialog.dart';
@@ -127,6 +128,11 @@ class _BranchSidebarState extends State<BranchSidebar> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _openInFileExplorer() async {
+    final error = await openInFileExplorer(widget.repoPath);
+    if (error != null) _showError(error);
   }
 
   String _shortRemoteName(String remoteBranchName) {
@@ -380,6 +386,18 @@ class _BranchSidebarState extends State<BranchSidebar> {
                   ),
                   onPressed: () =>
                       showRemotesDialog(context, widget.repoPath),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  iconSize: 16,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  tooltip: 'Open in file explorer',
+                  icon: Icon(
+                    Icons.folder_open,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  onPressed: _openInFileExplorer,
                 ),
               ],
             ),
