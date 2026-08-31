@@ -76,6 +76,30 @@ class BranchEntry {
   final bool isRemote;
 }
 
+/// A single configured remote, as returned by `rustgit_remotes`.
+class RemoteEntry {
+  const RemoteEntry({required this.name, required this.url});
+
+  factory RemoteEntry.fromJson(Map<String, dynamic> json) {
+    return RemoteEntry(
+      name: json['name'] as String,
+      url: json['url'] as String,
+    );
+  }
+
+  final String name;
+  final String url;
+}
+
+/// The `user.name`/`user.email` identity read from git's global config, as
+/// returned by `rustgit_global_config_get`.
+class GlobalGitIdentity {
+  const GlobalGitIdentity({this.name, this.email});
+
+  final String? name;
+  final String? email;
+}
+
 /// A single file's working-tree/index status, as returned by
 /// `rustgit_status`.
 class StatusEntry {

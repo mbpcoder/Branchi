@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'branch_watch_store.dart';
 import 'git_actions.dart';
 import 'models.dart';
+import 'remotes_dialog.dart';
 
 /// Auto-refresh interval choices offered by the watch dropdown, in minutes.
 const List<int> kBranchWatchIntervalsMinutes = [5, 10, 15, 30, 45, 60];
@@ -381,6 +382,19 @@ class _BranchSidebarState extends State<BranchSidebar> {
                       _selectWatchInterval(position);
                     },
                   ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  iconSize: 16,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  tooltip: 'Git config',
+                  icon: Icon(
+                    Icons.settings_outlined,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  onPressed: () =>
+                      showRemotesDialog(context, widget.repoPath),
                 ),
               ],
             ),

@@ -7,7 +7,7 @@
 //! MUST pass any non-null returned string to [`rustgit_free_string`]
 //! exactly once to release it.
 
-use crate::git::GitRepo;
+use crate::git::{self, GitRepo};
 use serde::Serialize;
 use std::ffi::{c_char, CStr, CString};
 
@@ -304,6 +304,94 @@ pub unsafe extern "C" fn rustgit_push(path: *const c_char, name: *const c_char) 
     let name = c_str_to_string(name);
     let result = GitRepo::open(&path).and_then(|repo| repo.push(&name));
     result_to_c_string(result)
+}
+
+/// Returns the repository's configured remotes as a JSON string:
+/// `{"ok": [RemoteInfo, ...]}` or `{"error": "..."}`.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
+/// call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_remotes(path: *const c_char) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let result = GitRepo::open(&path).and_then(|repo| repo.remotes());
+    result_to_json_c_string(result)
+}
+
+/// Adds a new remote `name` pointing at `url` in the repository at `path`.
+///
+/// # Safety
+/// `path`, `name`, and `url` must be valid, NUL-terminated UTF-8 C strings
+/// that outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_add_remote(
+    path: *const c_char,
+    name: *const c_char,
+    url: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let name = c_str_to_string(name);
+    let url = c_str_to_string(url);
+    let result = GitRepo::open(&path).and_then(|repo| repo.add_remote(&name, &url));
+    result_to_c_string(result)
+}
+
+/// Changes the URL of existing remote `name` in the repository at `path`.
+///
+/// # Safety
+/// `path`, `name`, and `url` must be valid, NUL-terminated UTF-8 C strings
+/// that outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_set_remote_url(
+    path: *const c_char,
+    name: *const c_char,
+    url: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let name = c_str_to_string(name);
+    let url = c_str_to_string(url);
+    let result = GitRepo::open(&path).and_then(|repo| repo.set_remote_url(&name, &url));
+    result_to_c_string(result)
+}
+
+/// Removes remote `name` from the repository at `path`.
+///
+/// # Safety
+/// `path` and `name` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_remove_remote(
+    path: *const c_char,
+    name: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let name = c_str_to_string(name);
+    let result = GitRepo::open(&path).and_then(|repo| repo.remove_remote(&name));
+    result_to_c_string(result)
+}
+
+/// Returns the `user.name`/`user.email` identity from git's global config
+/// as a JSON string: `{"ok": GlobalIdentity}` or `{"error": "..."}`.
+#[no_mangle]
+pub extern "C" fn rustgit_global_config_get() -> *mut c_char {
+    result_to_json_c_string(git::global_identity())
+}
+
+/// Writes `name`/`email` into git's global config. Either may be an empty
+/// string to leave that field unset.
+///
+/// # Safety
+/// `name` and `email` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_global_config_set(
+    name: *const c_char,
+    email: *const c_char,
+) -> *mut c_char {
+    let name = c_str_to_string(name);
+    let email = c_str_to_string(email);
+    result_to_c_string(git::set_global_identity(&name, &email))
 }
 
 /// Releases a string previously returned by one of this module's
