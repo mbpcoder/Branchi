@@ -76,6 +76,34 @@ class BranchEntry {
   final bool isRemote;
 }
 
+/// A single file's working-tree/index status, as returned by
+/// `rustgit_status`.
+class StatusEntry {
+  const StatusEntry({
+    required this.path,
+    required this.staged,
+    required this.unstaged,
+  });
+
+  factory StatusEntry.fromJson(Map<String, dynamic> json) {
+    return StatusEntry(
+      path: json['path'] as String,
+      staged: json['staged'] == null
+          ? null
+          : _statusFromJson(json['staged'] as String),
+      unstaged: json['unstaged'] == null
+          ? null
+          : _statusFromJson(json['unstaged'] as String),
+    );
+  }
+
+  final String path;
+  final FileChangeStatus? staged;
+  final FileChangeStatus? unstaged;
+
+  bool get isStaged => staged != null;
+}
+
 class DiffFileEntry {
   const DiffFileEntry({
     required this.path,

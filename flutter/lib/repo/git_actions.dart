@@ -211,6 +211,109 @@ class GitActions {
         : GitActionResult.failure(error);
   }
 
+  /// Working-tree/index status of every changed file.
+  static Future<List<StatusEntry>> status(String path) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) throw StateError(_missingLibraryErrorWithPaths());
+
+    final raw = await Isolate.run(() => ffi.status(path));
+    return raw
+        .cast<Map<String, dynamic>>()
+        .map(StatusEntry.fromJson)
+        .toList();
+  }
+
+  /// Stages [filePath] (equivalent to `git add <filePath>`).
+  static Future<GitActionResult> stage(String path, String filePath) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
+
+    final error = await Isolate.run(() => ffi.stage(path, filePath));
+    ActionLog.instance.record(
+      'stage $filePath',
+      success: error == null,
+      detail: error,
+    );
+    return error == null
+        ? const GitActionResult.success()
+        : GitActionResult.failure(error);
+  }
+
+  /// Unstages [filePath], leaving the working tree unchanged.
+  static Future<GitActionResult> unstage(String path, String filePath) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
+
+    final error = await Isolate.run(() => ffi.unstage(path, filePath));
+    ActionLog.instance.record(
+      'unstage $filePath',
+      success: error == null,
+      detail: error,
+    );
+    return error == null
+        ? const GitActionResult.success()
+        : GitActionResult.failure(error);
+  }
+
+  /// Discards working-tree changes to [filePath].
+  static Future<GitActionResult> revertFile(
+    String path,
+    String filePath,
+  ) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
+
+    final error = await Isolate.run(() => ffi.revertFile(path, filePath));
+    ActionLog.instance.record(
+      'revert $filePath',
+      success: error == null,
+      detail: error,
+    );
+    return error == null
+        ? const GitActionResult.success()
+        : GitActionResult.failure(error);
+  }
+
+  /// Commits the current index with [message], using the repository's
+  /// configured `user.name`/`user.email`.
+  static Future<GitActionResult> commit(String path, String message) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
+
+    String? error;
+    try {
+      await Isolate.run(() => ffi.commit(path, message));
+    } on GitFfiException catch (e) {
+      error = e.message;
+    } catch (e) {
+      error = e.toString();
+    }
+    ActionLog.instance.record(
+      'commit',
+      success: error == null,
+      detail: error,
+    );
+    return error == null
+        ? const GitActionResult.success()
+        : GitActionResult.failure(error);
+  }
+
+  /// Pushes local branch [name] to its upstream remote.
+  static Future<GitActionResult> push(String path, String name) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
+
+    final error = await Isolate.run(() => ffi.push(path, name));
+    ActionLog.instance.record(
+      'push $name',
+      success: error == null,
+      detail: error,
+    );
+    return error == null
+        ? const GitActionResult.success()
+        : GitActionResult.failure(error);
+  }
+
   static const _missingLibraryError =
       'rustgit_core native library not found. Build it with '
       '`cargo build -p rustgit-core` and rerun the app.';
