@@ -532,8 +532,19 @@ impl GitRepo {
         Ok(())
     }
 
+    /// Supplies credentials for a remote operation (fetch/push) using only
+    /// in-process libgit2 mechanisms: an SSH key from a running ssh-agent,
+    /// or the platform's native default credentials (e.g. Windows SSPI).
+    ///
+    /// Deliberately does *not* call `git2::Cred::credential_helper`: that
+    /// API shells out to the external program configured as
+    /// `credential.helper` (spawning it via `std::process::Command`), which
+    /// on Windows briefly flashes a console window since this app has none
+    /// of its own. Every other git operation in this module goes through
+    /// libgit2 directly with no child processes; this keeps credential
+    /// resolution consistent with that.
     fn credentials_callback(
-        url: &str,
+        _url: &str,
         username_from_url: Option<&str>,
         allowed_types: git2::CredentialType,
     ) -> std::result::Result<git2::Cred, git2::Error> {
@@ -542,17 +553,6 @@ impl GitRepo {
                 if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
                     return Ok(cred);
                 }
-            }
-        }
-        if allowed_types.contains(git2::CredentialType::USER_PASS_PLAINTEXT)
-            || allowed_types.contains(git2::CredentialType::DEFAULT)
-        {
-            if let Ok(cred) = git2::Cred::credential_helper(
-                &git2::Config::open_default()?,
-                url,
-                username_from_url,
-            ) {
-                return Ok(cred);
             }
         }
         git2::Cred::default()
