@@ -2,13 +2,72 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_locale.dart';
 import '../l10n/translations.dart';
+import 'shell_preferences.dart';
 
 /// Settings page opened from the gear icon in the top toolbar.
 ///
-/// For now this only exposes the language picker, but it's the natural
-/// place to grow other app-wide preferences later.
+/// Exposes the language picker and the list of shells available to the
+/// terminal panel.
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
+
+  Future<void> _addShell(BuildContext context) async {
+    final nameController = TextEditingController();
+    final executableController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    final shell = await showDialog<ShellDefinition>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(translate('add_shell')),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: nameController,
+                decoration: InputDecoration(labelText: translate('shell_name')),
+                validator: (value) => (value == null || value.trim().isEmpty)
+                    ? translate('shell_name_required')
+                    : null,
+              ),
+              TextFormField(
+                controller: executableController,
+                decoration:
+                    InputDecoration(labelText: translate('shell_executable')),
+                validator: (value) => (value == null || value.trim().isEmpty)
+                    ? translate('shell_executable_required')
+                    : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(translate('cancel')),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState?.validate() != true) return;
+              Navigator.of(context).pop(
+                ShellDefinition(
+                  name: nameController.text.trim(),
+                  executable: executableController.text.trim(),
+                ),
+              );
+            },
+            child: Text(translate('add')),
+          ),
+        ],
+      ),
+    );
+
+    if (shell != null) {
+      await ShellPreferences.add(shell);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,6 +96,90 @@ class SettingsPage extends StatelessWidget {
                     }
                   },
                 ),
+              const Divider(height: 32),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  translate('shells'),
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  translate('shells_description'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+              ValueListenableBuilder<List<ShellDefinition>>(
+                valueListenable: ShellPreferences.detected,
+                builder: (context, detected, _) {
+                  if (detected.isEmpty) return const SizedBox.shrink();
+                  return Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                        child: Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: Text(
+                            translate('detected_shells'),
+                            style: Theme.of(context).textTheme.labelLarge,
+                          ),
+                        ),
+                      ),
+                      for (final shell in detected)
+                        ListTile(
+                          leading: const Icon(Icons.terminal),
+                          title: Text(shell.name),
+                          subtitle: Text(shell.executable),
+                        ),
+                    ],
+                  );
+                },
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(
+                    translate('custom_shells'),
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                ),
+              ),
+              ValueListenableBuilder<List<ShellDefinition>>(
+                valueListenable: ShellPreferences.custom,
+                builder: (context, custom, _) {
+                  if (custom.isEmpty) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(translate('no_shells_configured')),
+                    );
+                  }
+                  return Column(
+                    children: [
+                      for (var i = 0; i < custom.length; i++)
+                        ListTile(
+                          leading: const Icon(Icons.terminal),
+                          title: Text(custom[i].name),
+                          subtitle: Text(custom[i].executable),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: () => ShellPreferences.removeAt(i),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: OutlinedButton.icon(
+                  onPressed: () => _addShell(context),
+                  icon: const Icon(Icons.add),
+                  label: Text(translate('add_shell')),
+                ),
+              ),
             ],
           ),
         );

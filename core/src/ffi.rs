@@ -208,6 +208,104 @@ pub unsafe extern "C" fn rustgit_update_branch(
     result_to_c_string(result)
 }
 
+/// Returns the working-tree/index status of every changed file as a JSON
+/// string: `{"ok": [StatusEntry, ...]}` or `{"error": "..."}`.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
+/// call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_status(path: *const c_char) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let result = GitRepo::open(&path).and_then(|repo| repo.status());
+    result_to_json_c_string(result)
+}
+
+/// Stages `file_path` (equivalent to `git add <file_path>`) in the
+/// repository at `path`.
+///
+/// # Safety
+/// `path` and `file_path` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_stage(
+    path: *const c_char,
+    file_path: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let file_path = c_str_to_string(file_path);
+    let result = GitRepo::open(&path).and_then(|repo| repo.stage(&file_path));
+    result_to_c_string(result)
+}
+
+/// Unstages `file_path` (equivalent to `git reset <file_path>`) in the
+/// repository at `path`, leaving the working tree unchanged.
+///
+/// # Safety
+/// `path` and `file_path` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_unstage(
+    path: *const c_char,
+    file_path: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let file_path = c_str_to_string(file_path);
+    let result = GitRepo::open(&path).and_then(|repo| repo.unstage(&file_path));
+    result_to_c_string(result)
+}
+
+/// Discards working-tree changes to `file_path` in the repository at
+/// `path`, restoring it to the version in the index.
+///
+/// # Safety
+/// `path` and `file_path` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_revert_file(
+    path: *const c_char,
+    file_path: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let file_path = c_str_to_string(file_path);
+    let result = GitRepo::open(&path).and_then(|repo| repo.revert_file(&file_path));
+    result_to_c_string(result)
+}
+
+/// Commits the current index in the repository at `path` with `message`,
+/// using the repository's configured `user.name`/`user.email` as both
+/// author and committer. Returns the new commit's id as a JSON string:
+/// `{"ok": "<commit id>"}` or `{"error": "..."}`.
+///
+/// # Safety
+/// `path` and `message` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_commit(
+    path: *const c_char,
+    message: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let message = c_str_to_string(message);
+    let result =
+        GitRepo::open(&path).and_then(|repo| repo.commit_with_configured_identity(&message));
+    result_to_json_c_string(result)
+}
+
+/// Pushes local branch `name` to its upstream remote in the repository at
+/// `path`.
+///
+/// # Safety
+/// `path` and `name` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn rustgit_push(path: *const c_char, name: *const c_char) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let name = c_str_to_string(name);
+    let result = GitRepo::open(&path).and_then(|repo| repo.push(&name));
+    result_to_c_string(result)
+}
+
 /// Releases a string previously returned by one of this module's
 /// functions. Safe to call with a null pointer (no-op).
 ///

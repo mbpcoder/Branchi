@@ -39,9 +39,10 @@ TerminalSession spawnTerminalSession(
   int id,
   String title, {
   String? workingDirectory,
+  String? shellExecutable,
 }) {
   final pty = Pty.start(
-    defaultShell(),
+    shellExecutable ?? defaultShell(),
     columns: 80,
     rows: 24,
     workingDirectory: workingDirectory ?? Directory.current.path,

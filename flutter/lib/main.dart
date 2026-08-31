@@ -4,6 +4,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
 import 'l10n/app_locale.dart';
+import 'settings/shell_preferences.dart';
 import 'theme/app_theme.dart';
 
 export 'app.dart';
@@ -18,5 +19,6 @@ Future<void> main() async {
   }
   await AppLocale.load();
   await AppTheme.load();
+  await ShellPreferences.load();
   runApp(const RustGitApp());
 }
