@@ -11,9 +11,13 @@ const double _maxTreeWidth = 480;
 /// The "Code" mode view: a project file tree on the left, a tab-based code
 /// editor on the right.
 class CodeView extends StatefulWidget {
-  const CodeView({super.key, required this.repoPath});
+  const CodeView({super.key, required this.repoPath, this.onLanguageChanged});
 
   final String repoPath;
+
+  /// Forwarded to [CodeEditorPanel] so the app's bottom bar can show the
+  /// active file's detected type.
+  final ValueChanged<String?>? onLanguageChanged;
 
   @override
   State<CodeView> createState() => CodeViewState();
@@ -53,7 +57,10 @@ class CodeViewState extends State<CodeView> {
         ),
         ColumnResizeHandle(onDrag: _resizeTree),
         Expanded(
-          child: CodeEditorPanel(key: _editorKey),
+          child: CodeEditorPanel(
+            key: _editorKey,
+            onLanguageChanged: widget.onLanguageChanged,
+          ),
         ),
       ],
     );

@@ -313,8 +313,18 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   Expanded(
                     child: _tabs[_activeTabIndex].path != null
                         ? RepositoryView(
-                            key: ValueKey(_tabs[_activeTabIndex].path),
+                            key: _tabs[_activeTabIndex].repositoryViewKey,
                             path: _tabs[_activeTabIndex].path!,
+                            onLanguageChanged: (label) => setState(
+                              () => _tabs[_activeTabIndex].fileTypeLabel =
+                                  label,
+                            ),
+                            onBranchInfoChanged: (head, branches) => setState(
+                              () {
+                                _tabs[_activeTabIndex].currentBranch = head;
+                                _tabs[_activeTabIndex].branches = branches;
+                              },
+                            ),
                           )
                         : WelcomeForm(
                             key: ValueKey(_tabs[_activeTabIndex].id),
@@ -352,6 +362,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                     onToggleTerminal: _toggleTerminal,
                     isLogsOpen: _tabs[_activeTabIndex].isLogsOpen,
                     onToggleLogs: _toggleLogs,
+                    fileTypeLabel: _tabs[_activeTabIndex].fileTypeLabel,
+                    currentBranch: _tabs[_activeTabIndex].currentBranch,
+                    branches: _tabs[_activeTabIndex].branches,
+                    onSelectBranch: (branch) => _tabs[_activeTabIndex]
+                        .repositoryViewKey
+                        .currentState
+                        ?.checkoutBranch(branch.name),
                   ),
                 ],
               ),
