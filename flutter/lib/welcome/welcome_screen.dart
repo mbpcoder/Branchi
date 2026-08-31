@@ -190,9 +190,30 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     _saveState();
   }
 
+  /// Closes the tab at [index]. If it's the only tab left, there's nothing
+  /// to fall back to, so it's reset to a blank "New Tab" instead — this is
+  /// what lets a tab with a repository open be closed even when it's the
+  /// last one.
   void _closeTab(int index) {
-    if (_tabs.length == 1) return;
     final removed = _tabs[index];
+    if (_tabs.length == 1) {
+      final oldSessions = List.of(removed.terminalSessions);
+      setState(() {
+        removed
+          ..path = null
+          ..title = 'New Tab'
+          ..isTerminalOpen = false
+          ..isLogsOpen = false
+          ..terminalSessions.clear()
+          ..nextTerminalId = 0
+          ..activeTerminalIndex = 0;
+      });
+      for (final session in oldSessions) {
+        session.dispose();
+      }
+      _saveState();
+      return;
+    }
     setState(() {
       _tabs.removeAt(index);
       if (_activeTabIndex >= _tabs.length) {
