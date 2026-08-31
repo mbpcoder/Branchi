@@ -2,11 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../code/code_view.dart';
 import 'branch_sidebar.dart';
 import 'column_resize_handle.dart';
 import 'commit_detail.dart';
 import 'commit_list.dart';
 import 'git_actions.dart';
+import 'mode_rail.dart';
 import 'models.dart';
 import 'panel_layout_store.dart';
 import 'working_changes_panel.dart';
@@ -46,6 +48,8 @@ class _RepositoryViewState extends State<RepositoryView> {
 
   double _sidebarWidth = _defaultSidebarWidth;
   double _commitListWidth = _defaultCommitListWidth;
+
+  RepoViewMode _mode = RepoViewMode.git;
 
   @override
   void initState() {
@@ -279,6 +283,22 @@ class _RepositoryViewState extends State<RepositoryView> {
       return Center(child: Text('Failed to load repository: $_loadError'));
     }
 
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ModeRail(
+          mode: _mode,
+          onChanged: (mode) => setState(() => _mode = mode),
+        ),
+        if (_mode == RepoViewMode.code)
+          Expanded(child: CodeView(repoPath: widget.path))
+        else
+          Expanded(child: _buildGitView(context)),
+      ],
+    );
+  }
+
+  Widget _buildGitView(BuildContext context) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
