@@ -112,9 +112,45 @@ class SettingsPage extends StatelessWidget {
                 ),
               ),
               ValueListenableBuilder<List<ShellDefinition>>(
-                valueListenable: ShellPreferences.shells,
-                builder: (context, shells, _) {
-                  if (shells.isEmpty) {
+                valueListenable: ShellPreferences.detected,
+                builder: (context, detected, _) {
+                  if (detected.isEmpty) return const SizedBox.shrink();
+                  return Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                        child: Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: Text(
+                            translate('detected_shells'),
+                            style: Theme.of(context).textTheme.labelLarge,
+                          ),
+                        ),
+                      ),
+                      for (final shell in detected)
+                        ListTile(
+                          leading: const Icon(Icons.terminal),
+                          title: Text(shell.name),
+                          subtitle: Text(shell.executable),
+                        ),
+                    ],
+                  );
+                },
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(
+                    translate('custom_shells'),
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                ),
+              ),
+              ValueListenableBuilder<List<ShellDefinition>>(
+                valueListenable: ShellPreferences.custom,
+                builder: (context, custom, _) {
+                  if (custom.isEmpty) {
                     return Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Text(translate('no_shells_configured')),
@@ -122,10 +158,11 @@ class SettingsPage extends StatelessWidget {
                   }
                   return Column(
                     children: [
-                      for (var i = 0; i < shells.length; i++)
+                      for (var i = 0; i < custom.length; i++)
                         ListTile(
-                          title: Text(shells[i].name),
-                          subtitle: Text(shells[i].executable),
+                          leading: const Icon(Icons.terminal),
+                          title: Text(custom[i].name),
+                          subtitle: Text(custom[i].executable),
                           trailing: IconButton(
                             icon: const Icon(Icons.delete_outline),
                             onPressed: () => ShellPreferences.removeAt(i),

@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'shell_detection.dart';
+
 const String _prefsKey = 'rustgit_configured_shells';
 
 /// A shell the user can launch in the terminal panel: a display name plus
@@ -33,24 +35,38 @@ class ShellDefinition {
   int get hashCode => Object.hash(name, executable);
 }
 
-/// User-configured list of shells that can be launched in the terminal
-/// panel, managed from the settings page.
+/// Shells available in the terminal panel: a list auto-detected from the
+/// OS, plus any the user defines by hand in the settings page.
 ///
-/// When empty, the terminal falls back to the platform default shell
-/// ([defaultShell] in `terminal_session.dart`). When there's exactly one
-/// configured shell, new terminal tabs use it directly. Only when there are
-/// two or more does the "new terminal tab" action offer a picker.
+/// When the combined list ([all]) is empty, the terminal falls back to the
+/// platform default shell ([defaultShell] in `terminal_session.dart`). When
+/// there's exactly one shell, new terminal tabs use it directly. Only when
+/// there are two or more does the "new terminal tab" action offer a
+/// picker.
 class ShellPreferences {
   ShellPreferences._();
 
-  static final ValueNotifier<List<ShellDefinition>> shells =
+  /// Shells found on this machine by [detectInstalledShells]. Not
+  /// persisted — recomputed on every launch so it stays in sync with what's
+  /// actually installed.
+  static final ValueNotifier<List<ShellDefinition>> detected =
       ValueNotifier<List<ShellDefinition>>(const []);
 
+  /// Shells the user has added by hand. Persisted across launches.
+  static final ValueNotifier<List<ShellDefinition>> custom =
+      ValueNotifier<List<ShellDefinition>>(const []);
+
+  /// The combined list terminal tabs pick from: auto-detected shells
+  /// followed by user-defined ones.
+  static List<ShellDefinition> get all => [...detected.value, ...custom.value];
+
   static Future<void> load() async {
+    detected.value = await detectInstalledShells();
+
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getStringList(_prefsKey);
     if (saved == null) return;
-    shells.value = [
+    custom.value = [
       for (final entry in saved)
         ShellDefinition.fromJson(
           jsonDecode(entry) as Map<String, dynamic>,
@@ -62,18 +78,18 @@ class ShellPreferences {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(
       _prefsKey,
-      [for (final shell in shells.value) jsonEncode(shell.toJson())],
+      [for (final shell in custom.value) jsonEncode(shell.toJson())],
     );
   }
 
   static Future<void> add(ShellDefinition shell) async {
-    shells.value = [...shells.value, shell];
+    custom.value = [...custom.value, shell];
     await _persist();
   }
 
   static Future<void> removeAt(int index) async {
-    final updated = [...shells.value]..removeAt(index);
-    shells.value = updated;
+    final updated = [...custom.value]..removeAt(index);
+    custom.value = updated;
     await _persist();
   }
 }

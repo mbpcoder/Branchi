@@ -68,6 +68,8 @@ const Map<String, Map<String, String>> translations = {
     'cancel': 'Cancel',
     'choose_shell': 'Choose a shell',
     'no_shells_configured': 'No shells configured.',
+    'detected_shells': 'Detected shells',
+    'custom_shells': 'Custom shells',
   },
   'ar': {
     'app_title': 'راست‌غيت',
@@ -113,6 +115,8 @@ const Map<String, Map<String, String>> translations = {
     'cancel': 'إلغاء',
     'choose_shell': 'اختر صدفة',
     'no_shells_configured': 'لا توجد أصداف مهيأة.',
+    'detected_shells': 'الأصداف المكتشفة',
+    'custom_shells': 'الأصداف المخصصة',
   },
   'fa': {
     'app_title': 'راست‌گیت',
@@ -158,5 +162,7 @@ const Map<String, Map<String, String>> translations = {
     'cancel': 'انصراف',
     'choose_shell': 'یک شل انتخاب کنید',
     'no_shells_configured': 'هیچ شلی پیکربندی نشده است.',
+    'detected_shells': 'شل‌های شناسایی‌شده',
+    'custom_shells': 'شل‌های سفارشی',
   },
 };

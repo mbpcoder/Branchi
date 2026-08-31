@@ -143,9 +143,12 @@ class _TerminalPanelState extends State<TerminalPanel> {
                         },
                       ),
                     ),
-                    ValueListenableBuilder<List<ShellDefinition>>(
-                      valueListenable: ShellPreferences.shells,
-                      builder: (context, shells, _) {
+                    AnimatedBuilder(
+                      animation: Listenable.merge(
+                        [ShellPreferences.detected, ShellPreferences.custom],
+                      ),
+                      builder: (context, _) {
+                        final shells = ShellPreferences.all;
                         if (shells.length <= 1) {
                           return IconButton(
                             tooltip: translate('new_tab'),
