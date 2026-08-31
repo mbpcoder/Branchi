@@ -255,6 +255,7 @@ class RepositoryViewState extends State<RepositoryView> {
       _isViewingChanges = true;
       _selectedCommit = null;
     });
+    unawaited(_loadStatus());
   }
 
   Future<bool> _stage(StatusEntry entry) async {
@@ -485,6 +486,7 @@ class RepositoryViewState extends State<RepositoryView> {
                   onCommit: _commit,
                   onCommitAndPush: _commitAndPush,
                   onOpenFile: (entry) => _openFileInEditor(entry.path),
+                  onRefresh: () => unawaited(_loadStatus()),
                 )
               : CommitDetail(
                   commit: _selectedCommit,

@@ -13,8 +13,13 @@ import 'package:re_highlight/styles/github.dart';
 class _OpenFile {
   _OpenFile(this.path, String initialText)
       : controller = CodeLineEditingController.fromText(initialText) {
+    // Compare against the controller's own (re_editor-normalized) text
+    // rather than the raw file contents: re_editor may normalize line
+    // endings or a missing trailing newline on load, which would otherwise
+    // make the file look dirty before the user has typed anything.
+    savedText = controller.text;
     controller.addListener(() {
-      final nowDirty = controller.text != initialText;
+      final nowDirty = controller.text != savedText;
       if (nowDirty != isDirty) {
         isDirty = nowDirty;
         onDirtyChanged?.call();
@@ -26,7 +31,7 @@ class _OpenFile {
   final CodeLineEditingController controller;
   bool isDirty = false;
   VoidCallback? onDirtyChanged;
-  String savedText = '';
+  late String savedText;
 }
 
 /// A VS Code-like tabbed text editor backed by `re_editor`, with syntax
@@ -77,7 +82,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
 
     try {
       final text = await File(path).readAsString();
-      final file = _OpenFile(path, text)..savedText = text;
+      final file = _OpenFile(path, text);
       file.onDirtyChanged = () => setState(() {});
       setState(() {
         _open.add(file);
@@ -247,11 +252,22 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _TabStrip(
-          files: _open,
-          activeIndex: _activeIndex,
-          onSelect: (i) => setState(() => _activeIndex = i),
-          onClose: _closeTab,
+        Row(
+          children: [
+            Expanded(
+              child: _TabStrip(
+                files: _open,
+                activeIndex: _activeIndex,
+                onSelect: (i) => setState(() => _activeIndex = i),
+                onClose: _closeTab,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.save, size: 18),
+              tooltip: 'Save (Ctrl+S)',
+              onPressed: active.isDirty ? () => _save(active) : null,
+            ),
+          ],
         ),
         if (_error != null)
           MaterialBanner(

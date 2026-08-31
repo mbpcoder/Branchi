@@ -73,6 +73,7 @@ class WorkingChangesDetail extends StatefulWidget {
     required this.onCommit,
     required this.onCommitAndPush,
     required this.onOpenFile,
+    required this.onRefresh,
   });
 
   final List<StatusEntry> status;
@@ -85,6 +86,7 @@ class WorkingChangesDetail extends StatefulWidget {
   final Future<bool> Function(String message) onCommit;
   final Future<bool> Function(String message) onCommitAndPush;
   final ValueChanged<StatusEntry> onOpenFile;
+  final VoidCallback onRefresh;
 
   @override
   State<WorkingChangesDetail> createState() => _WorkingChangesDetailState();
@@ -128,7 +130,21 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Commit', style: Theme.of(context).textTheme.titleMedium),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Commit',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh, size: 18),
+                    tooltip: 'Refresh changed files',
+                    onPressed: widget.isLoading ? null : widget.onRefresh,
+                  ),
+                ],
+              ),
               const SizedBox(height: 8),
               TextField(
                 controller: _messageController,
