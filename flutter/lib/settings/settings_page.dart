@@ -2,14 +2,69 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_locale.dart';
 import '../l10n/translations.dart';
+import '../repo/git_actions.dart';
 import 'shell_preferences.dart';
 
 /// Settings page opened from the gear icon in the top toolbar.
 ///
-/// Exposes the language picker and the list of shells available to the
-/// terminal panel.
-class SettingsPage extends StatelessWidget {
+/// Exposes the language picker, the list of shells available to the
+/// terminal panel, and the global git identity (user.name/user.email).
+class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  bool _loadingGitConfig = true;
+  bool _savingGitConfig = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadGlobalGitConfig();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadGlobalGitConfig() async {
+    try {
+      final identity = await GitActions.globalGitConfig();
+      if (!mounted) return;
+      setState(() {
+        _nameController.text = identity.name ?? '';
+        _emailController.text = identity.email ?? '';
+        _loadingGitConfig = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingGitConfig = false);
+    }
+  }
+
+  Future<void> _saveGlobalGitConfig() async {
+    setState(() => _savingGitConfig = true);
+    final result = await GitActions.setGlobalGitConfig(
+      _nameController.text.trim(),
+      _emailController.text.trim(),
+    );
+    if (!mounted) return;
+    setState(() => _savingGitConfig = false);
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(result.isSuccess ? translate('saved') : result.error!),
+      ),
+    );
+  }
 
   Future<void> _addShell(BuildContext context) async {
     final nameController = TextEditingController();
@@ -180,6 +235,55 @@ class SettingsPage extends StatelessWidget {
                   label: Text(translate('add_shell')),
                 ),
               ),
+              const Divider(height: 32),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  translate('global_git_config'),
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  translate('global_git_config_description'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+              if (_loadingGitConfig)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: Column(
+                    children: [
+                      TextField(
+                        controller: _nameController,
+                        decoration:
+                            InputDecoration(labelText: translate('git_user_name')),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _emailController,
+                        decoration: InputDecoration(
+                          labelText: translate('git_user_email'),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: AlignmentDirectional.centerEnd,
+                        child: FilledButton(
+                          onPressed:
+                              _savingGitConfig ? null : _saveGlobalGitConfig,
+                          child: Text(translate('save')),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
             ],
           ),
         );

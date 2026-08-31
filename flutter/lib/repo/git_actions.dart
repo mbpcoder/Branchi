@@ -314,6 +314,106 @@ class GitActions {
         : GitActionResult.failure(error);
   }
 
+  /// This repository's configured remotes.
+  static Future<List<RemoteEntry>> remotes(String path) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) throw StateError(_missingLibraryErrorWithPaths());
+
+    final raw = await Isolate.run(() => ffi.remotes(path));
+    return raw
+        .cast<Map<String, dynamic>>()
+        .map(RemoteEntry.fromJson)
+        .toList();
+  }
+
+  /// Adds a new remote [name] pointing at [url].
+  static Future<GitActionResult> addRemote(
+    String path,
+    String name,
+    String url,
+  ) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
+
+    final error = await Isolate.run(() => ffi.addRemote(path, name, url));
+    ActionLog.instance.record(
+      'add remote $name -> $url',
+      success: error == null,
+      detail: error,
+    );
+    return error == null
+        ? const GitActionResult.success()
+        : GitActionResult.failure(error);
+  }
+
+  /// Changes the URL of existing remote [name].
+  static Future<GitActionResult> setRemoteUrl(
+    String path,
+    String name,
+    String url,
+  ) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
+
+    final error = await Isolate.run(() => ffi.setRemoteUrl(path, name, url));
+    ActionLog.instance.record(
+      'set remote $name url -> $url',
+      success: error == null,
+      detail: error,
+    );
+    return error == null
+        ? const GitActionResult.success()
+        : GitActionResult.failure(error);
+  }
+
+  /// Removes remote [name].
+  static Future<GitActionResult> removeRemote(String path, String name) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
+
+    final error = await Isolate.run(() => ffi.removeRemote(path, name));
+    ActionLog.instance.record(
+      'remove remote $name',
+      success: error == null,
+      detail: error,
+    );
+    return error == null
+        ? const GitActionResult.success()
+        : GitActionResult.failure(error);
+  }
+
+  /// The `user.name`/`user.email` identity from git's global config.
+  static Future<GlobalGitIdentity> globalGitConfig() async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) throw StateError(_missingLibraryErrorWithPaths());
+
+    final raw = await Isolate.run(() => ffi.globalConfigGet());
+    return GlobalGitIdentity(
+      name: raw['name'] as String?,
+      email: raw['email'] as String?,
+    );
+  }
+
+  /// Writes [name]/[email] into git's global config. Pass an empty string
+  /// to leave a field unset.
+  static Future<GitActionResult> setGlobalGitConfig(
+    String name,
+    String email,
+  ) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
+
+    final error = await Isolate.run(() => ffi.globalConfigSet(name, email));
+    ActionLog.instance.record(
+      'set global git config',
+      success: error == null,
+      detail: error,
+    );
+    return error == null
+        ? const GitActionResult.success()
+        : GitActionResult.failure(error);
+  }
+
   static const _missingLibraryError =
       'rustgit_core native library not found. Build it with '
       '`cargo build -p rustgit-core` and rerun the app.';

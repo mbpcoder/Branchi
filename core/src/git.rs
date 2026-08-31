@@ -48,6 +48,20 @@ pub struct BranchInfo {
     pub is_remote: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct RemoteInfo {
+    pub name: String,
+    pub url: String,
+}
+
+/// The `user.name`/`user.email` identity read from git's global config
+/// (`~/.gitconfig` or equivalent), independent of any specific repository.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct GlobalIdentity {
+    pub name: Option<String>,
+    pub email: Option<String>,
+}
+
 /// A single file's change within a commit's diff against its first parent
 /// (or against the empty tree, for a root commit).
 #[derive(Debug, Clone, Serialize)]
@@ -608,6 +622,66 @@ impl GitRepo {
 
         Ok(oid.to_string())
     }
+
+    /// Lists this repository's configured remotes (name and fetch URL).
+    pub fn remotes(&self) -> Result<Vec<RemoteInfo>> {
+        let names = self.repo.remotes()?;
+        let mut remotes = Vec::new();
+        for name in names.iter().flatten() {
+            let remote = self.repo.find_remote(name)?;
+            remotes.push(RemoteInfo {
+                name: name.to_string(),
+                url: remote.url().unwrap_or_default().to_string(),
+            });
+        }
+        Ok(remotes)
+    }
+
+    /// Adds a new remote `name` pointing at `url`.
+    pub fn add_remote(&self, name: &str, url: &str) -> Result<()> {
+        self.repo.remote(name, url)?;
+        Ok(())
+    }
+
+    /// Changes the fetch (and push) URL of existing remote `name`.
+    pub fn set_remote_url(&self, name: &str, url: &str) -> Result<()> {
+        self.repo.remote_set_url(name, url)?;
+        self.repo.remote_set_pushurl(name, Some(url))?;
+        Ok(())
+    }
+
+    /// Removes remote `name`.
+    pub fn remove_remote(&self, name: &str) -> Result<()> {
+        self.repo.remote_delete(name)?;
+        Ok(())
+    }
+}
+
+/// Reads the `user.name`/`user.email` identity from git's global config
+/// (`~/.gitconfig` or equivalent), not tied to any specific repository.
+pub fn global_identity() -> Result<GlobalIdentity> {
+    let config = git2::Config::open_default()?;
+    Ok(GlobalIdentity {
+        name: config.get_string("user.name").ok(),
+        email: config.get_string("user.email").ok(),
+    })
+}
+
+/// Writes `name`/`email` into git's global config. Either may be empty to
+/// leave that field unset (removed from the global config if present).
+pub fn set_global_identity(name: &str, email: &str) -> Result<()> {
+    let mut config = git2::Config::open_default()?;
+    if name.is_empty() {
+        let _ = config.remove("user.name");
+    } else {
+        config.set_str("user.name", name)?;
+    }
+    if email.is_empty() {
+        let _ = config.remove("user.email");
+    } else {
+        config.set_str("user.email", email)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -852,5 +926,28 @@ mod tests {
         let log = local_repo.log(10).unwrap();
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].summary, "second");
+    }
+
+    #[test]
+    fn add_list_set_and_remove_remote() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        assert!(repo.remotes().unwrap().is_empty());
+
+        repo.add_remote("origin", "https://example.com/repo.git")
+            .unwrap();
+        let remotes = repo.remotes().unwrap();
+        assert_eq!(remotes.len(), 1);
+        assert_eq!(remotes[0].name, "origin");
+        assert_eq!(remotes[0].url, "https://example.com/repo.git");
+
+        repo.set_remote_url("origin", "https://example.com/other.git")
+            .unwrap();
+        let remotes = repo.remotes().unwrap();
+        assert_eq!(remotes[0].url, "https://example.com/other.git");
+
+        repo.remove_remote("origin").unwrap();
+        assert!(repo.remotes().unwrap().is_empty());
     }
 }

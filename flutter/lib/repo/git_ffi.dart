@@ -136,6 +136,52 @@ typedef _PushDart = Pointer<Utf8> Function(
   Pointer<Utf8> name,
 );
 
+typedef _RemotesNative = Pointer<Utf8> Function(Pointer<Utf8> path);
+typedef _RemotesDart = Pointer<Utf8> Function(Pointer<Utf8> path);
+
+typedef _AddRemoteNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+  Pointer<Utf8> url,
+);
+typedef _AddRemoteDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+  Pointer<Utf8> url,
+);
+
+typedef _SetRemoteUrlNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+  Pointer<Utf8> url,
+);
+typedef _SetRemoteUrlDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+  Pointer<Utf8> url,
+);
+
+typedef _RemoveRemoteNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+);
+typedef _RemoveRemoteDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> name,
+);
+
+typedef _GlobalConfigGetNative = Pointer<Utf8> Function();
+typedef _GlobalConfigGetDart = Pointer<Utf8> Function();
+
+typedef _GlobalConfigSetNative = Pointer<Utf8> Function(
+  Pointer<Utf8> name,
+  Pointer<Utf8> email,
+);
+typedef _GlobalConfigSetDart = Pointer<Utf8> Function(
+  Pointer<Utf8> name,
+  Pointer<Utf8> email,
+);
+
 typedef _FreeStringNative = Void Function(Pointer<Utf8> ptr);
 typedef _FreeStringDart = void Function(Pointer<Utf8> ptr);
 
@@ -190,6 +236,24 @@ class GitFfi {
         _commit =
             lib.lookupFunction<_CommitNative, _CommitDart>('rustgit_commit'),
         _push = lib.lookupFunction<_PushNative, _PushDart>('rustgit_push'),
+        _remotes = lib.lookupFunction<_RemotesNative, _RemotesDart>(
+          'rustgit_remotes',
+        ),
+        _addRemote = lib.lookupFunction<_AddRemoteNative, _AddRemoteDart>(
+          'rustgit_add_remote',
+        ),
+        _setRemoteUrl =
+            lib.lookupFunction<_SetRemoteUrlNative, _SetRemoteUrlDart>(
+          'rustgit_set_remote_url',
+        ),
+        _removeRemote =
+            lib.lookupFunction<_RemoveRemoteNative, _RemoveRemoteDart>(
+          'rustgit_remove_remote',
+        ),
+        _globalConfigGet = lib.lookupFunction<_GlobalConfigGetNative,
+            _GlobalConfigGetDart>('rustgit_global_config_get'),
+        _globalConfigSet = lib.lookupFunction<_GlobalConfigSetNative,
+            _GlobalConfigSetDart>('rustgit_global_config_set'),
         _freeString = lib.lookupFunction<_FreeStringNative, _FreeStringDart>(
           'rustgit_free_string',
         );
@@ -226,6 +290,12 @@ class GitFfi {
   final _RevertFileDart _revertFile;
   final _CommitDart _commit;
   final _PushDart _push;
+  final _RemotesDart _remotes;
+  final _AddRemoteDart _addRemote;
+  final _SetRemoteUrlDart _setRemoteUrl;
+  final _RemoveRemoteDart _removeRemote;
+  final _GlobalConfigGetDart _globalConfigGet;
+  final _GlobalConfigSetDart _globalConfigSet;
   final _FreeStringDart _freeString;
 
   /// Runs `git init` at [path] via the Rust core. Returns null on success,
@@ -441,6 +511,81 @@ class GitFfi {
     }
   }
 
+  /// This repository's configured remotes, as raw decoded JSON list
+  /// entries. Throws a [GitFfiException] on failure.
+  List<dynamic> remotes(String path) {
+    final pathPtr = path.toNativeUtf8();
+    try {
+      return _consumeJsonList(_remotes(pathPtr));
+    } finally {
+      malloc.free(pathPtr);
+    }
+  }
+
+  /// Adds a new remote [name] pointing at [url]. Returns null on success,
+  /// or an error message on failure.
+  String? addRemote(String path, String name, String url) {
+    final pathPtr = path.toNativeUtf8();
+    final namePtr = name.toNativeUtf8();
+    final urlPtr = url.toNativeUtf8();
+    try {
+      return _consumeError(_addRemote(pathPtr, namePtr, urlPtr));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(namePtr);
+      malloc.free(urlPtr);
+    }
+  }
+
+  /// Changes the URL of existing remote [name]. Returns null on success, or
+  /// an error message on failure.
+  String? setRemoteUrl(String path, String name, String url) {
+    final pathPtr = path.toNativeUtf8();
+    final namePtr = name.toNativeUtf8();
+    final urlPtr = url.toNativeUtf8();
+    try {
+      return _consumeError(_setRemoteUrl(pathPtr, namePtr, urlPtr));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(namePtr);
+      malloc.free(urlPtr);
+    }
+  }
+
+  /// Removes remote [name]. Returns null on success, or an error message on
+  /// failure.
+  String? removeRemote(String path, String name) {
+    final pathPtr = path.toNativeUtf8();
+    final namePtr = name.toNativeUtf8();
+    try {
+      return _consumeError(_removeRemote(pathPtr, namePtr));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(namePtr);
+    }
+  }
+
+  /// The `user.name`/`user.email` identity from git's global config, as a
+  /// raw decoded JSON map (`name`/`email` may be null). Throws a
+  /// [GitFfiException] on failure.
+  Map<String, dynamic> globalConfigGet() {
+    return _consumeJsonMap(_globalConfigGet());
+  }
+
+  /// Writes [name]/[email] into git's global config. Pass an empty string
+  /// to leave a field unset. Returns null on success, or an error message
+  /// on failure.
+  String? globalConfigSet(String name, String email) {
+    final namePtr = name.toNativeUtf8();
+    final emailPtr = email.toNativeUtf8();
+    try {
+      return _consumeError(_globalConfigSet(namePtr, emailPtr));
+    } finally {
+      malloc.free(namePtr);
+      malloc.free(emailPtr);
+    }
+  }
+
   /// Decodes a `{"ok": [...]}` / `{"error": "..."}` response, freeing the
   /// native string in the process.
   List<dynamic> _consumeJsonList(Pointer<Utf8> resultPtr) {
@@ -465,6 +610,19 @@ class GitFfi {
       throw GitFfiException(decoded['error'] as String);
     }
     return decoded['ok'] as String;
+  }
+
+  /// Decodes a `{"ok": {...}}` / `{"error": "..."}` response, freeing the
+  /// native string in the process.
+  Map<String, dynamic> _consumeJsonMap(Pointer<Utf8> resultPtr) {
+    final text = resultPtr.toDartString();
+    _freeString(resultPtr);
+
+    final decoded = jsonDecode(text) as Map<String, dynamic>;
+    if (decoded.containsKey('error')) {
+      throw GitFfiException(decoded['error'] as String);
+    }
+    return decoded['ok'] as Map<String, dynamic>;
   }
 
   static DynamicLibrary? _tryLoadLibrary() {
