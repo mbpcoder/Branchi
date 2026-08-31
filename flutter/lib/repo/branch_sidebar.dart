@@ -1,8 +1,5 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
-import 'branch_watch_store.dart';
 import 'git_actions.dart';
 import 'models.dart';
 
@@ -14,6 +11,66 @@ String branchWatchIntervalLabel(int minutes) {
   return '$minutes minutes';
 }
 
+// Dismissing the menu without picking anything also resolves to `null` from
+// showMenu, so "off" is modeled as this sentinel instead of `null` to tell
+// an explicit choice apart from a dismissal.
+const int kBranchWatchOffValue = -1;
+
+/// Shows the auto-refresh interval picker anchored at [position], with the
+/// currently active [currentIntervalMinutes] checked. Returns the chosen
+/// interval in minutes, or `null` for "off"/"disabled", or leaves the
+/// current selection untouched if the menu is dismissed.
+Future<int?> showBranchWatchIntervalMenu(
+  BuildContext context,
+  Offset position, {
+  required int? currentIntervalMinutes,
+}) async {
+  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+  final currentValue = currentIntervalMinutes ?? kBranchWatchOffValue;
+  final selected = await showMenu<int>(
+    context: context,
+    position: RelativeRect.fromRect(
+      position & const Size(1, 1),
+      Offset.zero & overlay.size,
+    ),
+    initialValue: currentValue,
+    items: [
+      for (final minutes in kBranchWatchIntervalsMinutes)
+        PopupMenuItem<int>(
+          value: minutes,
+          child: Row(
+            children: [
+              SizedBox(
+                width: 20,
+                child: minutes == currentValue
+                    ? const Icon(Icons.check, size: 16)
+                    : null,
+              ),
+              Text(branchWatchIntervalLabel(minutes)),
+            ],
+          ),
+        ),
+      const PopupMenuDivider(),
+      PopupMenuItem<int>(
+        value: kBranchWatchOffValue,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              child: currentValue == kBranchWatchOffValue
+                  ? const Icon(Icons.check, size: 16)
+                  : null,
+            ),
+            const Text('Off'),
+          ],
+        ),
+      ),
+    ],
+  );
+  if (selected == null) return currentIntervalMinutes;
+  return selected == kBranchWatchOffValue ? null : selected;
+}
+
 /// Left-hand sidebar listing local and remote branches for the open repo,
 /// with collapsible sections and per-branch checkout/delete/update actions.
 class BranchSidebar extends StatefulWidget {
@@ -22,6 +79,10 @@ class BranchSidebar extends StatefulWidget {
     required this.repoPath,
     required this.branches,
     required this.onChanged,
+    required this.watchIntervalMinutes,
+    required this.onWatchIntervalChanged,
+    required this.isUpdatingCurrentBranch,
+    required this.onUpdateCurrentBranch,
     this.width = 220,
   });
 
@@ -31,6 +92,15 @@ class BranchSidebar extends StatefulWidget {
   /// Called after a branch action (checkout/create/delete/update) succeeds,
   /// so the caller can reload the repository's commits and branches.
   final VoidCallback onChanged;
+
+  /// The currently active auto-refresh interval in minutes, or `null` if
+  /// auto-refresh is off. Owned by the parent so it keeps running even when
+  /// this sidebar isn't mounted (e.g. while the Code tab is active).
+  final int? watchIntervalMinutes;
+  final ValueChanged<int?> onWatchIntervalChanged;
+
+  final bool isUpdatingCurrentBranch;
+  final VoidCallback onUpdateCurrentBranch;
 
   final double width;
 
@@ -42,101 +112,14 @@ class _BranchSidebarState extends State<BranchSidebar> {
   bool _localExpanded = true;
   bool _remoteExpanded = true;
 
-  int? _watchIntervalMinutes;
-  Timer? _watchTimer;
-  bool _isUpdatingCurrentBranch = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadWatchInterval();
-  }
-
-  @override
-  void dispose() {
-    _watchTimer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  void didUpdateWidget(BranchSidebar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.repoPath != widget.repoPath) {
-      _loadWatchInterval();
-    }
-  }
-
-  Future<void> _loadWatchInterval() async {
-    final repoPath = widget.repoPath;
-    final minutes = await BranchWatchStore.loadIntervalMinutes(repoPath);
-    if (!mounted || repoPath != widget.repoPath) return;
-    setState(() => _watchIntervalMinutes = minutes);
-    _restartWatchTimer();
-  }
-
-  void _restartWatchTimer() {
-    _watchTimer?.cancel();
-    final minutes = _watchIntervalMinutes;
-    if (minutes == null) return;
-    _watchTimer = Timer.periodic(Duration(minutes: minutes), (_) {
-      _updateCurrentBranch();
-    });
-  }
-
-  Future<void> _updateCurrentBranch() async {
-    if (_isUpdatingCurrentBranch) return;
-    BranchEntry? head;
-    for (final branch in widget.branches) {
-      if (branch.isHead) {
-        head = branch;
-        break;
-      }
-    }
-    if (head == null) return;
-    setState(() => _isUpdatingCurrentBranch = true);
-    try {
-      await GitActions.updateBranch(
-        widget.repoPath,
-        head.name,
-        isRemote: head.isRemote,
-      );
-      if (!mounted) return;
-      widget.onChanged();
-    } finally {
-      if (mounted) setState(() => _isUpdatingCurrentBranch = false);
-    }
-  }
-
-  // Dismissing the menu without picking anything also resolves to `null`
-  // from showMenu, so "off" is modeled as this sentinel instead of `null`
-  // to tell an explicit choice apart from a dismissal.
-  static const int _offValue = -1;
-
   Future<void> _selectWatchInterval(Offset position) async {
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
-    final selected = await showMenu<int>(
-      context: context,
-      position: RelativeRect.fromRect(
-        position & const Size(1, 1),
-        Offset.zero & overlay.size,
-      ),
-      items: [
-        for (final minutes in kBranchWatchIntervalsMinutes)
-          PopupMenuItem<int>(
-            value: minutes,
-            child: Text(branchWatchIntervalLabel(minutes)),
-          ),
-        const PopupMenuDivider(),
-        const PopupMenuItem<int>(value: _offValue, child: Text('Off')),
-      ],
+    final newInterval = await showBranchWatchIntervalMenu(
+      context,
+      position,
+      currentIntervalMinutes: widget.watchIntervalMinutes,
     );
-    if (!mounted || selected == null) return;
-    final newInterval = selected == _offValue ? null : selected;
-    if (newInterval == _watchIntervalMinutes) return;
-    setState(() => _watchIntervalMinutes = newInterval);
-    _restartWatchTimer();
-    await BranchWatchStore.saveIntervalMinutes(widget.repoPath, newInterval);
+    if (!mounted || newInterval == widget.watchIntervalMinutes) return;
+    widget.onWatchIntervalChanged(newInterval);
   }
 
   void _showError(String message) {
@@ -337,10 +320,10 @@ class _BranchSidebarState extends State<BranchSidebar> {
                   iconSize: 16,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
-                  tooltip: _isUpdatingCurrentBranch
+                  tooltip: widget.isUpdatingCurrentBranch
                       ? 'Pulling…'
                       : 'Update current branch',
-                  icon: _isUpdatingCurrentBranch
+                  icon: widget.isUpdatingCurrentBranch
                       ? SizedBox(
                           width: 16,
                           height: 16,
@@ -353,7 +336,9 @@ class _BranchSidebarState extends State<BranchSidebar> {
                           Icons.refresh,
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
-                  onPressed: _isUpdatingCurrentBranch ? null : _updateCurrentBranch,
+                  onPressed: widget.isUpdatingCurrentBranch
+                      ? null
+                      : widget.onUpdateCurrentBranch,
                 ),
                 const SizedBox(width: 4),
                 Builder(
@@ -361,15 +346,15 @@ class _BranchSidebarState extends State<BranchSidebar> {
                     iconSize: 16,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
-                    tooltip: _watchIntervalMinutes == null
+                    tooltip: widget.watchIntervalMinutes == null
                         ? 'Auto-refresh current branch: off'
                         : 'Auto-refresh current branch every '
-                            '${branchWatchIntervalLabel(_watchIntervalMinutes!)}',
+                            '${branchWatchIntervalLabel(widget.watchIntervalMinutes!)}',
                     icon: Icon(
-                      _watchIntervalMinutes == null
+                      widget.watchIntervalMinutes == null
                           ? Icons.watch_later_outlined
                           : Icons.watch_later,
-                      color: _watchIntervalMinutes == null
+                      color: widget.watchIntervalMinutes == null
                           ? Theme.of(context).colorScheme.onSurfaceVariant
                           : Theme.of(context).colorScheme.primary,
                     ),
