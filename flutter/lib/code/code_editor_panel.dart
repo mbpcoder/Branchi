@@ -143,18 +143,32 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
       'js': 'javascript',
       'jsx': 'javascript',
       'mjs': 'javascript',
+      'cjs': 'javascript',
       'ts': 'typescript',
       'tsx': 'typescript',
       'json': 'json',
       'yaml': 'yaml',
       'yml': 'yaml',
       'md': 'markdown',
+      'markdown': 'markdown',
       'sh': 'bash',
       'bash': 'bash',
       'py': 'python',
       'xml': 'xml',
       'html': 'xml',
+      'php': 'php',
+      'css': 'css',
+      'scss': 'scss',
+      'cs': 'csharp',
+      'java': 'java',
+      'ini': 'ini',
+      'blade': 'php',
+      'vue': 'vue',
+      'env': 'properties',
     };
+    final basename = p.basename(path).toLowerCase();
+    if (basename.endsWith('.blade.php')) return 'php';
+    if (basename == '.env' || basename.startsWith('.env.')) return 'properties';
     return extToLanguage[ext];
   }
 
