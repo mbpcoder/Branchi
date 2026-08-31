@@ -3,6 +3,7 @@ import 'package:xterm/xterm.dart';
 
 import '../l10n/app_locale.dart';
 import '../logs/logs_panel.dart' show PanelResizeHandle, kPanelMinHeight, kPanelMaxHeight;
+import '../settings/shell_preferences.dart';
 import 'terminal_session.dart';
 
 /// The bottom terminal panel: a row of terminal tabs plus the active
@@ -23,7 +24,7 @@ class TerminalPanel extends StatefulWidget {
   final int activeIndex;
   final ValueChanged<int> onSelect;
   final ValueChanged<int> onClose;
-  final VoidCallback onAddTab;
+  final ValueChanged<ShellDefinition?> onAddTab;
   final double height;
   final ValueChanged<double> onHeightChanged;
 
@@ -71,7 +72,7 @@ class _TerminalPanelState extends State<TerminalPanel> {
   int get activeIndex => widget.activeIndex;
   ValueChanged<int> get onSelect => widget.onSelect;
   ValueChanged<int> get onClose => widget.onClose;
-  VoidCallback get onAddTab => widget.onAddTab;
+  ValueChanged<ShellDefinition?> get onAddTab => widget.onAddTab;
   double get height => widget.height;
   ValueChanged<double> get onHeightChanged => widget.onHeightChanged;
 
@@ -142,10 +143,30 @@ class _TerminalPanelState extends State<TerminalPanel> {
                         },
                       ),
                     ),
-                    IconButton(
-                      tooltip: translate('new_tab'),
-                      icon: const Icon(Icons.add),
-                      onPressed: onAddTab,
+                    ValueListenableBuilder<List<ShellDefinition>>(
+                      valueListenable: ShellPreferences.shells,
+                      builder: (context, shells, _) {
+                        if (shells.length <= 1) {
+                          return IconButton(
+                            tooltip: translate('new_tab'),
+                            icon: const Icon(Icons.add),
+                            onPressed: () =>
+                                onAddTab(shells.isEmpty ? null : shells.first),
+                          );
+                        }
+                        return PopupMenuButton<ShellDefinition>(
+                          tooltip: translate('new_tab'),
+                          icon: const Icon(Icons.add),
+                          onSelected: onAddTab,
+                          itemBuilder: (context) => [
+                            for (final shell in shells)
+                              PopupMenuItem(
+                                value: shell,
+                                child: Text(shell.name),
+                              ),
+                          ],
+                        );
+                      },
                     ),
                   ],
                 ),

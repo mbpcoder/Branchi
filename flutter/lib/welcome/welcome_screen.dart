@@ -10,6 +10,7 @@ import '../logs/logs_panel.dart';
 import '../models/repo_tab.dart';
 import '../repo/repository_view.dart';
 import '../settings/settings_page.dart';
+import '../settings/shell_preferences.dart';
 import '../terminal/terminal_panel.dart';
 import '../terminal/terminal_session.dart';
 import '../theme/app_theme.dart';
@@ -132,12 +133,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     setState(() => tab.isLogsOpen = !tab.isLogsOpen);
   }
 
-  Future<void> _addTerminalTab() async {
+  Future<void> _addTerminalTab([ShellDefinition? shell]) async {
     final tab = _tabs[_activeTabIndex];
     final session = spawnTerminalSession(
       tab.nextTerminalId,
       '${translate('terminal')} ${tab.nextTerminalId + 1}',
       workingDirectory: tab.path,
+      shellExecutable: shell?.executable,
     );
     tab.nextTerminalId++;
     if (!mounted) {
