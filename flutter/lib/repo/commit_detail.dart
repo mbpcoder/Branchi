@@ -13,6 +13,7 @@ class CommitDetail extends StatelessWidget {
     required this.error,
     required this.selectedFilePath,
     required this.onSelectFile,
+    required this.onOpenFile,
   });
 
   final CommitEntry? commit;
@@ -21,6 +22,7 @@ class CommitDetail extends StatelessWidget {
   final String? error;
   final String? selectedFilePath;
   final ValueChanged<String> onSelectFile;
+  final ValueChanged<String> onOpenFile;
 
   @override
   Widget build(BuildContext context) {
@@ -73,6 +75,7 @@ class CommitDetail extends StatelessWidget {
                         file: file,
                         selected: file.path == selectedFile?.path,
                         onTap: () => onSelectFile(file.path),
+                        onOpen: () => onOpenFile(file.path),
                       ),
                   ],
                 ),
@@ -96,11 +99,13 @@ class _FileTile extends StatelessWidget {
     required this.file,
     required this.selected,
     required this.onTap,
+    required this.onOpen,
   });
 
   final DiffFileEntry file;
   final bool selected;
   final VoidCallback onTap;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -131,6 +136,14 @@ class _FileTile extends StatelessWidget {
               Text(
                 '-${file.deletions}',
                 style: const TextStyle(color: Colors.red, fontSize: 12),
+              ),
+              IconButton(
+                tooltip: 'Open in editor',
+                icon: const Icon(Icons.edit_outlined, size: 16),
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                onPressed: onOpen,
               ),
             ],
           ),

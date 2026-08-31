@@ -72,6 +72,7 @@ class WorkingChangesDetail extends StatefulWidget {
     required this.onRevert,
     required this.onCommit,
     required this.onCommitAndPush,
+    required this.onOpenFile,
   });
 
   final List<StatusEntry> status;
@@ -83,6 +84,7 @@ class WorkingChangesDetail extends StatefulWidget {
   final ValueChanged<StatusEntry> onRevert;
   final Future<bool> Function(String message) onCommit;
   final Future<bool> Function(String message) onCommitAndPush;
+  final ValueChanged<StatusEntry> onOpenFile;
 
   @override
   State<WorkingChangesDetail> createState() => _WorkingChangesDetailState();
@@ -183,6 +185,7 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
             onStage: () => widget.onStage(entry),
             onUnstage: () => widget.onUnstage(entry),
             onRevert: () => widget.onRevert(entry),
+            onOpen: () => widget.onOpenFile(entry),
           ),
       ],
     );
@@ -195,12 +198,14 @@ class _StatusFileTile extends StatelessWidget {
     required this.onStage,
     required this.onUnstage,
     required this.onRevert,
+    required this.onOpen,
   });
 
   final StatusEntry entry;
   final VoidCallback onStage;
   final VoidCallback onUnstage;
   final VoidCallback onRevert;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -225,6 +230,9 @@ class _StatusFileTile extends StatelessWidget {
             icon: const Icon(Icons.more_horiz, size: 18),
             onSelected: (action) {
               switch (action) {
+                case 'open':
+                  onOpen();
+                  break;
                 case 'stage':
                   onStage();
                   break;
@@ -237,6 +245,7 @@ class _StatusFileTile extends StatelessWidget {
               }
             },
             itemBuilder: (context) => [
+              const PopupMenuItem(value: 'open', child: Text('Open in editor')),
               if (entry.unstaged != null)
                 const PopupMenuItem(value: 'stage', child: Text('Stage')),
               if (entry.isStaged)

@@ -16,10 +16,10 @@ class CodeView extends StatefulWidget {
   final String repoPath;
 
   @override
-  State<CodeView> createState() => _CodeViewState();
+  State<CodeView> createState() => CodeViewState();
 }
 
-class _CodeViewState extends State<CodeView> {
+class CodeViewState extends State<CodeView> {
   final GlobalKey<CodeEditorPanelState> _editorKey = GlobalKey();
   double _treeWidth = _defaultTreeWidth;
   String? _selectedPath;
@@ -28,6 +28,13 @@ class _CodeViewState extends State<CodeView> {
     setState(() {
       _treeWidth = (_treeWidth + delta).clamp(_minTreeWidth, _maxTreeWidth);
     });
+  }
+
+  /// Opens [absolutePath] in the editor, e.g. from an "Open in editor"
+  /// action elsewhere in the app.
+  void openFile(String absolutePath) {
+    setState(() => _selectedPath = absolutePath);
+    _editorKey.currentState?.openFile(absolutePath);
   }
 
   @override

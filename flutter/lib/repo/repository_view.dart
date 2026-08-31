@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
 import '../code/code_view.dart';
 import 'branch_sidebar.dart';
@@ -50,6 +51,7 @@ class _RepositoryViewState extends State<RepositoryView> {
   double _commitListWidth = _defaultCommitListWidth;
 
   RepoViewMode _mode = RepoViewMode.git;
+  final GlobalKey<CodeViewState> _codeViewKey = GlobalKey();
 
   @override
   void initState() {
@@ -243,6 +245,16 @@ class _RepositoryViewState extends State<RepositoryView> {
     return true;
   }
 
+  /// Switches to Code mode and opens [relativePath] (relative to the repo
+  /// root) in the editor, e.g. from a diff or working-changes file list.
+  void _openFileInEditor(String relativePath) {
+    final absolutePath = p.join(widget.path, relativePath);
+    setState(() => _mode = RepoViewMode.code);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _codeViewKey.currentState?.openFile(absolutePath);
+    });
+  }
+
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
@@ -291,7 +303,9 @@ class _RepositoryViewState extends State<RepositoryView> {
           onChanged: (mode) => setState(() => _mode = mode),
         ),
         if (_mode == RepoViewMode.code)
-          Expanded(child: CodeView(repoPath: widget.path))
+          Expanded(
+            child: CodeView(key: _codeViewKey, repoPath: widget.path),
+          )
         else
           Expanded(child: _buildGitView(context)),
       ],
@@ -357,6 +371,7 @@ class _RepositoryViewState extends State<RepositoryView> {
                   onRevert: _revertFile,
                   onCommit: _commit,
                   onCommitAndPush: _commitAndPush,
+                  onOpenFile: (entry) => _openFileInEditor(entry.path),
                 )
               : CommitDetail(
                   commit: _selectedCommit,
@@ -366,6 +381,7 @@ class _RepositoryViewState extends State<RepositoryView> {
                   selectedFilePath: _selectedFilePath,
                   onSelectFile: (path) =>
                       setState(() => _selectedFilePath = path),
+                  onOpenFile: _openFileInEditor,
                 ),
         ),
       ],
