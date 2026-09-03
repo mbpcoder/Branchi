@@ -47,6 +47,16 @@ flutter create --platforms=windows .
 This will add a `windows/` folder (and others if you ask for them) without
 touching the existing `lib/main.dart`.
 
+Then generate the Windows app icon from `assets/icon/branchi_logo.png`:
+
+```powershell
+flutter pub get
+dart run flutter_launcher_icons
+```
+
+This writes `windows/runner/resources/app_icon.ico` and updates
+`windows/runner/Runner.rc` to use it.
+
 ## Running the app
 
 ```powershell
