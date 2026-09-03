@@ -50,4 +50,4 @@ jobs:
           $tag = "windows-build-$($env:GITHUB_RUN_NUMBER)"
           gh release create $tag branchi-windows.zip `
             --title "Branchi Windows build $($env:GITHUB_RUN_NUMBER)" `
-            --notes "Automated Windows build from commit $($env:GITHUB_SHA)."
+            --generate-notes
