@@ -27,6 +27,8 @@ const Map<String, Map<String, String>> translations = {
   'en': {
     'app_title': 'Branchi',
     'new_tab': 'New tab',
+    'copy': 'Copy',
+    'paste': 'Paste',
     'welcome': 'Welcome to Branchi',
     'pin_window': 'Keep window on top',
     'unpin_window': 'Unpin window',
@@ -92,6 +94,8 @@ const Map<String, Map<String, String>> translations = {
   'ar': {
     'app_title': 'راست‌غيت',
     'new_tab': 'علامة تبويب جديدة',
+    'copy': 'نسخ',
+    'paste': 'لصق',
     'welcome': 'مرحبًا بك في Branchi',
     'pin_window': 'إبقاء النافذة في المقدمة',
     'unpin_window': 'إلغاء التثبيت',
@@ -157,6 +161,8 @@ const Map<String, Map<String, String>> translations = {
   'fa': {
     'app_title': 'راست‌گیت',
     'new_tab': 'برگه جدید',
+    'copy': 'کپی',
+    'paste': 'جای‌گذاری',
     'welcome': 'به Branchi خوش آمدید',
     'pin_window': 'نگه‌داشتن پنجره در بالا',
     'unpin_window': 'برداشتن سنجاق',
