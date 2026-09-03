@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'shell_detection.dart';
 
-const String _prefsKey = 'rustgit_configured_shells';
+const String _prefsKey = 'branchi_configured_shells';
 
 /// A shell the user can launch in the terminal panel: a display name plus
 /// the executable (and optional args) to spawn, e.g. `powershell.exe` or

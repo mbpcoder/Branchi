@@ -20,5 +20,5 @@ Future<void> main() async {
   await AppLocale.load();
   await AppTheme.load();
   await ShellPreferences.load();
-  runApp(const RustGitApp());
+  runApp(const BranchiApp());
 }

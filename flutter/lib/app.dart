@@ -6,8 +6,8 @@ import 'l10n/translations.dart';
 import 'theme/app_theme.dart';
 import 'welcome/welcome_screen.dart';
 
-class RustGitApp extends StatelessWidget {
-  const RustGitApp({super.key});
+class BranchiApp extends StatelessWidget {
+  const BranchiApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -18,7 +18,7 @@ class RustGitApp extends StatelessWidget {
           valueListenable: AppTheme.themeMode,
           builder: (context, themeMode, _) {
             return MaterialApp(
-              title: 'RustGit',
+              title: 'Branchi',
               locale: Locale(languageCode),
               supportedLocales:
                   supportedLanguages.map((lang) => Locale(lang.code)),

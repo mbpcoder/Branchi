@@ -1,5 +1,5 @@
-name: rustgit
-description: RustGit - a Rust + Flutter git client (Rust backend, Flutter UI).
+name: branchi
+description: Branchi - a Rust + Flutter git client (Rust backend, Flutter UI).
 publish_to: "none"
 version: 0.1.0
 

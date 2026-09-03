@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-const String _prefsKey = 'rustgit_theme_mode';
+const String _prefsKey = 'branchi_theme_mode';
 const String _defaultThemeMode = 'system';
 
 /// Global, app-wide selected theme mode (light/dark/system).

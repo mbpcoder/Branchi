@@ -1,6 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-const String _keyPrefix = 'rustgit_branch_watch_interval_minutes_';
+const String _keyPrefix = 'branchi_branch_watch_interval_minutes_';
 
 /// Persists the selected auto-refresh interval for the branches column's
 /// watch feature, scoped per repository path so each repo remembers its own

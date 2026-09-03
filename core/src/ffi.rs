@@ -4,7 +4,7 @@
 //!
 //! Every fallible entry point returns a heap-allocated, NUL-terminated
 //! UTF-8 error string on failure, or a null pointer on success. Callers
-//! MUST pass any non-null returned string to [`rustgit_free_string`]
+//! MUST pass any non-null returned string to [`branchi_free_string`]
 //! exactly once to release it.
 
 use crate::git::{self, GitRepo};
@@ -25,7 +25,7 @@ fn result_to_c_string<T>(result: anyhow::Result<T>) -> *mut c_char {
 /// Converts a `Result` into a JSON string of the shape
 /// `{"ok": <value>}` or `{"error": "<message>"}`. Unlike
 /// [`result_to_c_string`] this always returns a non-null pointer, which
-/// callers must still free with [`rustgit_free_string`].
+/// callers must still free with [`branchi_free_string`].
 fn result_to_json_c_string<T: Serialize>(result: anyhow::Result<T>) -> *mut c_char {
     let payload = match result {
         Ok(value) => serde_json::json!({ "ok": value }),
@@ -50,7 +50,7 @@ unsafe fn c_str_to_string(ptr: *const c_char) -> String {
 /// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
 /// call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_init(path: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn branchi_init(path: *const c_char) -> *mut c_char {
     let path = c_str_to_string(path);
     result_to_c_string(GitRepo::init(&path))
 }
@@ -61,7 +61,7 @@ pub unsafe extern "C" fn rustgit_init(path: *const c_char) -> *mut c_char {
 /// `url` and `path` must be valid, NUL-terminated UTF-8 C strings that
 /// outlive the call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_clone(url: *const c_char, path: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn branchi_clone(url: *const c_char, path: *const c_char) -> *mut c_char {
     let url = c_str_to_string(url);
     let path = c_str_to_string(path);
     result_to_c_string(GitRepo::clone(&url, &path))
@@ -74,7 +74,7 @@ pub unsafe extern "C" fn rustgit_clone(url: *const c_char, path: *const c_char) 
 /// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
 /// call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_is_repository(path: *const c_char) -> bool {
+pub unsafe extern "C" fn branchi_is_repository(path: *const c_char) -> bool {
     let path = c_str_to_string(path);
     GitRepo::open(&path).is_ok()
 }
@@ -87,7 +87,7 @@ pub unsafe extern "C" fn rustgit_is_repository(path: *const c_char) -> bool {
 /// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
 /// call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_log(path: *const c_char, limit: usize) -> *mut c_char {
+pub unsafe extern "C" fn branchi_log(path: *const c_char, limit: usize) -> *mut c_char {
     let path = c_str_to_string(path);
     let result = GitRepo::open(&path).and_then(|repo| repo.log(limit));
     result_to_json_c_string(result)
@@ -100,7 +100,7 @@ pub unsafe extern "C" fn rustgit_log(path: *const c_char, limit: usize) -> *mut 
 /// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
 /// call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_branches(path: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn branchi_branches(path: *const c_char) -> *mut c_char {
     let path = c_str_to_string(path);
     let result = GitRepo::open(&path).and_then(|repo| repo.branches());
     result_to_json_c_string(result)
@@ -114,7 +114,7 @@ pub unsafe extern "C" fn rustgit_branches(path: *const c_char) -> *mut c_char {
 /// `path` and `commit_id` must be valid, NUL-terminated UTF-8 C strings
 /// that outlive the call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_commit_diff(
+pub unsafe extern "C" fn branchi_commit_diff(
     path: *const c_char,
     commit_id: *const c_char,
 ) -> *mut c_char {
@@ -130,7 +130,7 @@ pub unsafe extern "C" fn rustgit_commit_diff(
 /// `path` and `name` must be valid, NUL-terminated UTF-8 C strings that
 /// outlive the call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_checkout_branch(
+pub unsafe extern "C" fn branchi_checkout_branch(
     path: *const c_char,
     name: *const c_char,
 ) -> *mut c_char {
@@ -149,7 +149,7 @@ pub unsafe extern "C" fn rustgit_checkout_branch(
 /// `path`, `name`, and `from` must be valid, NUL-terminated UTF-8 C strings
 /// that outlive the call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_create_branch(
+pub unsafe extern "C" fn branchi_create_branch(
     path: *const c_char,
     name: *const c_char,
     from: *const c_char,
@@ -170,7 +170,7 @@ pub unsafe extern "C" fn rustgit_create_branch(
 /// `path` and `name` must be valid, NUL-terminated UTF-8 C strings that
 /// outlive the call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_delete_branch(
+pub unsafe extern "C" fn branchi_delete_branch(
     path: *const c_char,
     name: *const c_char,
     is_remote: bool,
@@ -191,7 +191,7 @@ pub unsafe extern "C" fn rustgit_delete_branch(
 /// `path` and `name` must be valid, NUL-terminated UTF-8 C strings that
 /// outlive the call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_update_branch(
+pub unsafe extern "C" fn branchi_update_branch(
     path: *const c_char,
     name: *const c_char,
     is_remote: bool,
@@ -215,7 +215,7 @@ pub unsafe extern "C" fn rustgit_update_branch(
 /// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
 /// call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_status(path: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn branchi_status(path: *const c_char) -> *mut c_char {
     let path = c_str_to_string(path);
     let result = GitRepo::open(&path).and_then(|repo| repo.status());
     result_to_json_c_string(result)
@@ -228,7 +228,7 @@ pub unsafe extern "C" fn rustgit_status(path: *const c_char) -> *mut c_char {
 /// `path` and `file_path` must be valid, NUL-terminated UTF-8 C strings that
 /// outlive the call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_stage(
+pub unsafe extern "C" fn branchi_stage(
     path: *const c_char,
     file_path: *const c_char,
 ) -> *mut c_char {
@@ -245,7 +245,7 @@ pub unsafe extern "C" fn rustgit_stage(
 /// `path` and `file_path` must be valid, NUL-terminated UTF-8 C strings that
 /// outlive the call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_unstage(
+pub unsafe extern "C" fn branchi_unstage(
     path: *const c_char,
     file_path: *const c_char,
 ) -> *mut c_char {
@@ -262,7 +262,7 @@ pub unsafe extern "C" fn rustgit_unstage(
 /// `path` and `file_path` must be valid, NUL-terminated UTF-8 C strings that
 /// outlive the call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_revert_file(
+pub unsafe extern "C" fn branchi_revert_file(
     path: *const c_char,
     file_path: *const c_char,
 ) -> *mut c_char {
@@ -281,7 +281,7 @@ pub unsafe extern "C" fn rustgit_revert_file(
 /// `path` and `message` must be valid, NUL-terminated UTF-8 C strings that
 /// outlive the call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_commit(
+pub unsafe extern "C" fn branchi_commit(
     path: *const c_char,
     message: *const c_char,
 ) -> *mut c_char {
@@ -299,7 +299,7 @@ pub unsafe extern "C" fn rustgit_commit(
 /// `path` and `name` must be valid, NUL-terminated UTF-8 C strings that
 /// outlive the call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_push(path: *const c_char, name: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn branchi_push(path: *const c_char, name: *const c_char) -> *mut c_char {
     let path = c_str_to_string(path);
     let name = c_str_to_string(name);
     let result = GitRepo::open(&path).and_then(|repo| repo.push(&name));
@@ -313,7 +313,7 @@ pub unsafe extern "C" fn rustgit_push(path: *const c_char, name: *const c_char) 
 /// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
 /// call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_remotes(path: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn branchi_remotes(path: *const c_char) -> *mut c_char {
     let path = c_str_to_string(path);
     let result = GitRepo::open(&path).and_then(|repo| repo.remotes());
     result_to_json_c_string(result)
@@ -325,7 +325,7 @@ pub unsafe extern "C" fn rustgit_remotes(path: *const c_char) -> *mut c_char {
 /// `path`, `name`, and `url` must be valid, NUL-terminated UTF-8 C strings
 /// that outlive the call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_add_remote(
+pub unsafe extern "C" fn branchi_add_remote(
     path: *const c_char,
     name: *const c_char,
     url: *const c_char,
@@ -343,7 +343,7 @@ pub unsafe extern "C" fn rustgit_add_remote(
 /// `path`, `name`, and `url` must be valid, NUL-terminated UTF-8 C strings
 /// that outlive the call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_set_remote_url(
+pub unsafe extern "C" fn branchi_set_remote_url(
     path: *const c_char,
     name: *const c_char,
     url: *const c_char,
@@ -361,7 +361,7 @@ pub unsafe extern "C" fn rustgit_set_remote_url(
 /// `path` and `name` must be valid, NUL-terminated UTF-8 C strings that
 /// outlive the call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_remove_remote(
+pub unsafe extern "C" fn branchi_remove_remote(
     path: *const c_char,
     name: *const c_char,
 ) -> *mut c_char {
@@ -374,7 +374,7 @@ pub unsafe extern "C" fn rustgit_remove_remote(
 /// Returns the `user.name`/`user.email` identity from git's global config
 /// as a JSON string: `{"ok": GlobalIdentity}` or `{"error": "..."}`.
 #[no_mangle]
-pub extern "C" fn rustgit_global_config_get() -> *mut c_char {
+pub extern "C" fn branchi_global_config_get() -> *mut c_char {
     result_to_json_c_string(git::global_identity())
 }
 
@@ -385,7 +385,7 @@ pub extern "C" fn rustgit_global_config_get() -> *mut c_char {
 /// `name` and `email` must be valid, NUL-terminated UTF-8 C strings that
 /// outlive the call.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_global_config_set(
+pub unsafe extern "C" fn branchi_global_config_set(
     name: *const c_char,
     email: *const c_char,
 ) -> *mut c_char {
@@ -401,7 +401,7 @@ pub unsafe extern "C" fn rustgit_global_config_set(
 /// `ptr` must either be null or a pointer previously returned by a
 /// function in this module, not already freed.
 #[no_mangle]
-pub unsafe extern "C" fn rustgit_free_string(ptr: *mut c_char) {
+pub unsafe extern "C" fn branchi_free_string(ptr: *mut c_char) {
     if ptr.is_null() {
         return;
     }
@@ -418,10 +418,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = CString::new(dir.path().to_str().unwrap()).unwrap();
 
-        let err = unsafe { rustgit_init(path.as_ptr()) };
+        let err = unsafe { branchi_init(path.as_ptr()) };
         assert!(err.is_null());
 
-        let is_repo = unsafe { rustgit_is_repository(path.as_ptr()) };
+        let is_repo = unsafe { branchi_is_repository(path.as_ptr()) };
         assert!(is_repo);
     }
 
@@ -433,8 +433,8 @@ mod tests {
         std::fs::write(&file_path, "x").unwrap();
         let path = CString::new(file_path.to_str().unwrap()).unwrap();
 
-        let err = unsafe { rustgit_init(path.as_ptr()) };
+        let err = unsafe { branchi_init(path.as_ptr()) };
         assert!(!err.is_null());
-        unsafe { rustgit_free_string(err) };
+        unsafe { branchi_free_string(err) };
     }
 }

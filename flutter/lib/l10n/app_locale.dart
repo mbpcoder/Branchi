@@ -3,7 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'translations.dart';
 
-const String _prefsKey = 'rustgit_language_code';
+const String _prefsKey = 'branchi_language_code';
 const String _defaultLanguageCode = 'en';
 
 /// Global, app-wide selected language.

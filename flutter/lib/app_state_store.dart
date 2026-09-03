@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-const String _prefsKey = 'rustgit_app_state';
+const String _prefsKey = 'branchi_app_state';
 
 /// A single persisted tab: an unattached start-page tab has [path] == null.
 /// Terminal state is per-tab, so restoring a terminal spawns it in that
