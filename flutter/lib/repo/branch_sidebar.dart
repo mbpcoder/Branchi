@@ -272,6 +272,16 @@ class _BranchSidebarState extends State<BranchSidebar> {
     }
   }
 
+  Future<void> _push(BranchEntry branch) async {
+    final result = await GitActions.push(widget.repoPath, branch.name);
+    if (!mounted) return;
+    if (result.isSuccess) {
+      widget.onChanged();
+    } else {
+      _showError(result.error!);
+    }
+  }
+
   Future<void> _showContextMenu(Offset position, BranchEntry branch) async {
     final overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox;
@@ -281,10 +291,12 @@ class _BranchSidebarState extends State<BranchSidebar> {
         position & const Size(1, 1),
         Offset.zero & overlay.size,
       ),
-      items: const [
-        PopupMenuItem(value: 'checkout', child: Text('Checkout')),
-        PopupMenuItem(value: 'update', child: Text('Update')),
-        PopupMenuItem(value: 'delete', child: Text('Delete')),
+      items: [
+        const PopupMenuItem(value: 'checkout', child: Text('Checkout')),
+        const PopupMenuItem(value: 'update', child: Text('Update')),
+        if (!branch.isRemote)
+          const PopupMenuItem(value: 'push', child: Text('Push')),
+        const PopupMenuItem(value: 'delete', child: Text('Delete')),
       ],
     );
     if (!mounted || action == null) return;
@@ -294,6 +306,9 @@ class _BranchSidebarState extends State<BranchSidebar> {
         break;
       case 'update':
         await _update(branch);
+        break;
+      case 'push':
+        await _push(branch);
         break;
       case 'delete':
         await _delete(branch);
