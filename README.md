@@ -51,7 +51,7 @@ Then generate the Windows app icon from `assets/icon/branchi_logo.png`:
 
 ```powershell
 flutter pub get
-dart run flutter_launcher_icons
+flutter pub run flutter_launcher_icons
 ```
 
 This writes `windows/runner/resources/app_icon.ico` and updates
