@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart';
 
 import '../l10n/app_locale.dart';
@@ -34,6 +35,7 @@ class TerminalPanel extends StatefulWidget {
 
 class _TerminalPanelState extends State<TerminalPanel> {
   final FocusNode _focusNode = FocusNode();
+  final TerminalController _controller = TerminalController();
 
   @override
   void initState() {
@@ -54,7 +56,71 @@ class _TerminalPanelState extends State<TerminalPanel> {
   @override
   void dispose() {
     _focusNode.dispose();
+    _controller.dispose();
     super.dispose();
+  }
+
+  /// Extracts the currently selected terminal text, if any.
+  String? _selectedText() {
+    final selection = _controller.selection;
+    if (selection == null) return null;
+    final terminal = sessions[activeIndex].terminal;
+    final lines = <String>[];
+    for (final segment in selection.toSegments()) {
+      lines.add(terminal.buffer.lines[segment.line].getText(
+        segment.start,
+        segment.end,
+      ));
+    }
+    final text = lines.join('\n');
+    return text.isEmpty ? null : text;
+  }
+
+  Future<void> _copySelection() async {
+    final text = _selectedText();
+    if (text == null) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) _controller.clearSelection();
+  }
+
+  Future<void> _pasteClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.isEmpty) return;
+    sessions[activeIndex].terminal.paste(text);
+  }
+
+  Future<void> _showContextMenu(Offset globalPosition) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final hasSelection = _selectedText() != null;
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        globalPosition & const Size(1, 1),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        PopupMenuItem(
+          value: 'copy',
+          enabled: hasSelection,
+          child: Text(translate('copy')),
+        ),
+        PopupMenuItem(
+          value: 'paste',
+          child: Text(translate('paste')),
+        ),
+      ],
+    );
+    switch (action) {
+      case 'copy':
+        await _copySelection();
+        break;
+      case 'paste':
+        await _pasteClipboard();
+        break;
+    }
+    if (mounted) _focusNode.requestFocus();
   }
 
   /// Explicitly grabs keyboard focus once the terminal has finished
@@ -182,6 +248,7 @@ class _TerminalPanelState extends State<TerminalPanel> {
                         child: TerminalView(
                           key: ValueKey(sessions[activeIndex].id),
                           sessions[activeIndex].terminal,
+                          controller: _controller,
                           focusNode: _focusNode,
                           autofocus: true,
                           // This is a desktop-only terminal, so keystrokes
@@ -191,6 +258,8 @@ class _TerminalPanelState extends State<TerminalPanel> {
                           // working after certain keys (e.g. Enter) on some
                           // platforms.
                           hardwareKeyboardOnly: true,
+                          onSecondaryTapUp: (details, offset) =>
+                              _showContextMenu(details.globalPosition),
                         ),
                       ),
               ),
