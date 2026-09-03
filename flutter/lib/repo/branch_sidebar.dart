@@ -113,6 +113,25 @@ class BranchSidebar extends StatefulWidget {
 class _BranchSidebarState extends State<BranchSidebar> {
   bool _localExpanded = true;
   bool _remoteExpanded = true;
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _isSearching = !_isSearching;
+      if (!_isSearching) {
+        _searchController.clear();
+        _searchQuery = '';
+      }
+    });
+  }
 
   Future<void> _selectWatchInterval(Offset position) async {
     final newInterval = await showBranchWatchIntervalMenu(
@@ -318,8 +337,15 @@ class _BranchSidebarState extends State<BranchSidebar> {
 
   @override
   Widget build(BuildContext context) {
-    final local = widget.branches.where((b) => !b.isRemote).toList();
-    final remote = widget.branches.where((b) => b.isRemote).toList();
+    final query = _searchQuery.trim().toLowerCase();
+    final local = widget.branches
+        .where((b) => !b.isRemote)
+        .where((b) => query.isEmpty || b.name.toLowerCase().contains(query))
+        .toList();
+    final remote = widget.branches
+        .where((b) => b.isRemote)
+        .where((b) => query.isEmpty || b.name.toLowerCase().contains(query))
+        .toList();
 
     return Container(
       width: widget.width,
@@ -394,6 +420,20 @@ class _BranchSidebarState extends State<BranchSidebar> {
                   iconSize: 16,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
+                  tooltip: _isSearching ? 'Close search' : 'Search branches',
+                  icon: Icon(
+                    _isSearching ? Icons.close : Icons.search,
+                    color: _isSearching
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  onPressed: _toggleSearch,
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  iconSize: 16,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                   tooltip: 'Git config',
                   icon: Icon(
                     Icons.settings_outlined,
@@ -417,6 +457,23 @@ class _BranchSidebarState extends State<BranchSidebar> {
               ],
             ),
           ),
+          if (_isSearching)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: TextField(
+                controller: _searchController,
+                autofocus: true,
+                style: const TextStyle(fontSize: 13),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: 'Search branches',
+                  prefixIcon: const Icon(Icons.search, size: 16),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: (value) => setState(() => _searchQuery = value),
+              ),
+            ),
           if (_localExpanded)
             for (final branch in local)
               _BranchTile(
