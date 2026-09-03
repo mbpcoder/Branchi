@@ -415,8 +415,8 @@ class GitActions {
   }
 
   static const _missingLibraryError =
-      'rustgit_core native library not found. Build it with '
-      '`cargo build -p rustgit-core` and rerun the app.';
+      'branchi_core native library not found. Build it with '
+      '`cargo build -p branchi-core` and rerun the app.';
 
   /// [_missingLibraryError] plus the exact paths that were tried, so a
   /// failure report says where to look instead of just "not found".

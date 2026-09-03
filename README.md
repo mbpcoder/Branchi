@@ -1,11 +1,11 @@
-# RustGit
+# Branchi
 
-RustGit is a git client built the same way as [RustDesk](https://github.com/rustdesk/rustdesk):
+Branchi is a git client built the same way as [RustDesk](https://github.com/rustdesk/rustdesk):
 a **Rust** core with a **Flutter** UI on top.
 
-- `core/` — Rust library (`rustgit-core`) that will hold the git logic.
+- `core/` — Rust library (`branchi-core`) that will hold the git logic.
 - `flutter/` — Flutter application (the UI). Right now it just shows a
-  "Welcome to RustGit" screen; this is the starting point for the real client.
+  "Welcome to Branchi" screen; this is the starting point for the real client.
 
 ## Prerequisites (Windows 11)
 
@@ -47,6 +47,16 @@ flutter create --platforms=windows .
 This will add a `windows/` folder (and others if you ask for them) without
 touching the existing `lib/main.dart`.
 
+Then generate the Windows app icon from `assets/icon/branchi_logo.png`:
+
+```powershell
+flutter pub get
+flutter pub run flutter_launcher_icons
+```
+
+This writes `windows/runner/resources/app_icon.ico` and updates
+`windows/runner/Runner.rc` to use it.
+
 ## Running the app
 
 ```powershell
@@ -55,7 +65,7 @@ flutter pub get
 flutter run -d windows
 ```
 
-This opens a desktop window that says **"Welcome to RustGit"**.
+This opens a desktop window that says **"Welcome to Branchi"**.
 
 ## Running the built app (after `flutter build`)
 
@@ -70,17 +80,17 @@ flutter build windows
 The compiled executable is placed at:
 
 ```
-flutter\build\windows\x64\runner\Release\rustgit.exe
+flutter\build\windows\x64\runner\Release\branchi.exe
 ```
 
 Launch it directly, e.g.:
 
 ```powershell
-.\build\windows\x64\runner\Release\rustgit.exe
+.\build\windows\x64\runner\Release\branchi.exe
 ```
 
 or double-click it in File Explorer. The `Release` folder also contains the
-`.dll` files the app needs, so keep `rustgit.exe` in that folder (or copy the
+`.dll` files the app needs, so keep `branchi.exe` in that folder (or copy the
 whole folder) rather than moving the `.exe` alone.
 
 ## Building the Rust core
@@ -99,7 +109,7 @@ cargo test
 
 ## Local database
 
-RustGit stores its local state (known repos, app settings) in **SQLite**,
+Branchi stores its local state (known repos, app settings) in **SQLite**,
 accessed through [`sqlx`](https://github.com/launchbadge/sqlx) — the same
 combination RustDesk's server uses for its own persistence. This keeps the
 door open to later pointing at Postgres/MySQL for a hosted/sync scenario,
@@ -117,9 +127,9 @@ runtime `sqlx::query(...)` calls rather than the compile-time-checked
 ## Project layout
 
 ```
-rustgit/
+branchi/
 ├── Cargo.toml          # Rust workspace
-├── core/                # Rust core library (rustgit-core)
+├── core/                # Rust core library (branchi-core)
 │   ├── migrations/      # sqlx SQL migrations
 │   └── src/
 │       ├── lib.rs

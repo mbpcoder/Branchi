@@ -150,6 +150,18 @@ class _WelcomeFormState extends State<WelcomeForm> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Row(
+              children: [
+                Image.asset(
+                  'assets/icon/branchi_logo.png',
+                  width: 40,
+                  height: 40,
+                ),
+                const SizedBox(width: 12),
+                Text('Branchi', style: Theme.of(context).textTheme.headlineSmall),
+              ],
+            ),
+            const SizedBox(height: 24),
             Text(
               translate('local_repositories'),
               style: Theme.of(context).textTheme.titleLarge,

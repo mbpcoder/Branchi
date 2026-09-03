@@ -1,6 +1,6 @@
 /// Data models mirroring `core/src/git.rs`'s JSON-serialized types, as
-/// returned by the `rustgit_log`, `rustgit_branches`, and
-/// `rustgit_commit_diff` FFI calls.
+/// returned by the `branchi_log`, `branchi_branches`, and
+/// `branchi_commit_diff` FFI calls.
 
 enum FileChangeStatus { new_, modified, deleted, renamed, typechange, conflicted }
 
@@ -76,7 +76,7 @@ class BranchEntry {
   final bool isRemote;
 }
 
-/// A single configured remote, as returned by `rustgit_remotes`.
+/// A single configured remote, as returned by `branchi_remotes`.
 class RemoteEntry {
   const RemoteEntry({required this.name, required this.url});
 
@@ -92,7 +92,7 @@ class RemoteEntry {
 }
 
 /// The `user.name`/`user.email` identity read from git's global config, as
-/// returned by `rustgit_global_config_get`.
+/// returned by `branchi_global_config_get`.
 class GlobalGitIdentity {
   const GlobalGitIdentity({this.name, this.email});
 
@@ -101,7 +101,7 @@ class GlobalGitIdentity {
 }
 
 /// A single file's working-tree/index status, as returned by
-/// `rustgit_status`.
+/// `branchi_status`.
 class StatusEntry {
   const StatusEntry({
     required this.path,

@@ -15,8 +15,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Build native library (rustgit_core.dll)
-        run: cargo build --release -p rustgit-core
+      - name: Build native library (branchi_core.dll)
+        run: cargo build --release -p branchi-core
 
       - uses: subosito/flutter-action@v2
         with:
@@ -38,16 +38,16 @@ jobs:
         run: flutter build windows --release
 
       - name: Bundle native library with the app
-        run: Copy-Item target\release\rustgit_core.dll flutter\build\windows\x64\runner\Release\rustgit_core.dll
+        run: Copy-Item target\release\branchi_core.dll flutter\build\windows\x64\runner\Release\branchi_core.dll
 
       - name: Package release archive
-        run: Compress-Archive -Path flutter\build\windows\x64\runner\Release\* -DestinationPath rustgit-windows.zip
+        run: Compress-Archive -Path flutter\build\windows\x64\runner\Release\* -DestinationPath branchi-windows.zip
 
       - name: Create release and upload artifact
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "windows-build-$($env:GITHUB_RUN_NUMBER)"
-          gh release create $tag rustgit-windows.zip `
-            --title "RustGit Windows build $($env:GITHUB_RUN_NUMBER)" `
+          gh release create $tag branchi-windows.zip `
+            --title "Branchi Windows build $($env:GITHUB_RUN_NUMBER)" `
             --notes "Automated Windows build from commit $($env:GITHUB_SHA)."

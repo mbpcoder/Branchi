@@ -1,7 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-const String _sidebarWidthKey = 'rustgit_panel_sidebar_width';
-const String _commitListWidthKey = 'rustgit_panel_commit_list_width';
+const String _sidebarWidthKey = 'branchi_panel_sidebar_width';
+const String _commitListWidthKey = 'branchi_panel_commit_list_width';
 
 /// Persists the user-adjusted widths of the branch sidebar and commit list
 /// columns in [RepositoryView], the same way [AppLocale] persists the

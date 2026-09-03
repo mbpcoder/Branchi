@@ -474,7 +474,7 @@ impl GitRepo {
 
         branch
             .get_mut()
-            .set_target(upstream_commit.id(), "rustgit: fast-forward update")?;
+            .set_target(upstream_commit.id(), "branchi: fast-forward update")?;
 
         if self.repo.head()?.name() == Some(branch_refname.as_str()) {
             let obj = self.repo.find_object(upstream_commit.id(), None)?;

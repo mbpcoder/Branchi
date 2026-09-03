@@ -129,14 +129,14 @@ mod tests {
         let db = Database::connect_in_memory().await.unwrap();
 
         let id = db
-            .add_repo("rustgit", "/home/user/rustgit", Some("https://github.com/mbp165/rustgit"))
+            .add_repo("branchi", "/home/user/branchi", Some("https://github.com/mbp165/branchi"))
             .await
             .unwrap();
 
         let repos = db.list_repos().await.unwrap();
         assert_eq!(repos.len(), 1);
         assert_eq!(repos[0].id, id);
-        assert_eq!(repos[0].name, "rustgit");
+        assert_eq!(repos[0].name, "branchi");
 
         db.remove_repo(id).await.unwrap();
         assert!(db.list_repos().await.unwrap().is_empty());
