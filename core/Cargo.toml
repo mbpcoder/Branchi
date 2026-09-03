@@ -1,11 +1,11 @@
 [package]
-name = "rustgit-core"
+name = "branchi-core"
 version = "0.1.0"
 edition = "2021"
-description = "Core library for the RustGit client (Rust backend, Flutter UI)"
+description = "Core library for the Branchi client (Rust backend, Flutter UI)"
 
 [lib]
-name = "rustgit_core"
+name = "branchi_core"
 crate-type = ["staticlib", "cdylib", "lib"]
 
 [dependencies]

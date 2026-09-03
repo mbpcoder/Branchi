@@ -1,6 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-const String _prefsKey = 'rustgit_recent_repositories';
+const String _prefsKey = 'branchi_recent_repositories';
 const int _maxEntries = 10;
 
 /// Persists the list of recently opened/cloned repository paths, most

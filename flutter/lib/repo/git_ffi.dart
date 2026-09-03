@@ -185,7 +185,7 @@ typedef _GlobalConfigSetDart = Pointer<Utf8> Function(
 typedef _FreeStringNative = Void Function(Pointer<Utf8> ptr);
 typedef _FreeStringDart = void Function(Pointer<Utf8> ptr);
 
-/// Loads the `rustgit_core` cdylib and exposes its C ABI (see
+/// Loads the `branchi_core` cdylib and exposes its C ABI (see
 /// `core/src/ffi.rs`) as typed Dart functions.
 ///
 /// This is a hand-written binding rather than a generated one (e.g. via
@@ -193,69 +193,69 @@ typedef _FreeStringDart = void Function(Pointer<Utf8> ptr);
 /// bridged surface grows much beyond init/clone/open, switch to codegen.
 class GitFfi {
   GitFfi._(DynamicLibrary lib)
-      : _init = lib.lookupFunction<_InitNative, _InitDart>('rustgit_init'),
+      : _init = lib.lookupFunction<_InitNative, _InitDart>('branchi_init'),
         _clone =
-            lib.lookupFunction<_CloneNative, _CloneDart>('rustgit_clone'),
+            lib.lookupFunction<_CloneNative, _CloneDart>('branchi_clone'),
         _isRepository = lib.lookupFunction<_IsRepositoryNative,
-            _IsRepositoryDart>('rustgit_is_repository'),
-        _log = lib.lookupFunction<_LogNative, _LogDart>('rustgit_log'),
+            _IsRepositoryDart>('branchi_is_repository'),
+        _log = lib.lookupFunction<_LogNative, _LogDart>('branchi_log'),
         _branches = lib.lookupFunction<_BranchesNative, _BranchesDart>(
-          'rustgit_branches',
+          'branchi_branches',
         ),
         _commitDiff =
             lib.lookupFunction<_CommitDiffNative, _CommitDiffDart>(
-          'rustgit_commit_diff',
+          'branchi_commit_diff',
         ),
         _checkoutBranch =
             lib.lookupFunction<_CheckoutBranchNative, _CheckoutBranchDart>(
-          'rustgit_checkout_branch',
+          'branchi_checkout_branch',
         ),
         _createBranch =
             lib.lookupFunction<_CreateBranchNative, _CreateBranchDart>(
-          'rustgit_create_branch',
+          'branchi_create_branch',
         ),
         _deleteBranch =
             lib.lookupFunction<_DeleteBranchNative, _DeleteBranchDart>(
-          'rustgit_delete_branch',
+          'branchi_delete_branch',
         ),
         _updateBranch =
             lib.lookupFunction<_UpdateBranchNative, _UpdateBranchDart>(
-          'rustgit_update_branch',
+          'branchi_update_branch',
         ),
         _status =
-            lib.lookupFunction<_StatusNative, _StatusDart>('rustgit_status'),
+            lib.lookupFunction<_StatusNative, _StatusDart>('branchi_status'),
         _stage =
-            lib.lookupFunction<_StageNative, _StageDart>('rustgit_stage'),
+            lib.lookupFunction<_StageNative, _StageDart>('branchi_stage'),
         _unstage = lib.lookupFunction<_UnstageNative, _UnstageDart>(
-          'rustgit_unstage',
+          'branchi_unstage',
         ),
         _revertFile =
             lib.lookupFunction<_RevertFileNative, _RevertFileDart>(
-          'rustgit_revert_file',
+          'branchi_revert_file',
         ),
         _commit =
-            lib.lookupFunction<_CommitNative, _CommitDart>('rustgit_commit'),
-        _push = lib.lookupFunction<_PushNative, _PushDart>('rustgit_push'),
+            lib.lookupFunction<_CommitNative, _CommitDart>('branchi_commit'),
+        _push = lib.lookupFunction<_PushNative, _PushDart>('branchi_push'),
         _remotes = lib.lookupFunction<_RemotesNative, _RemotesDart>(
-          'rustgit_remotes',
+          'branchi_remotes',
         ),
         _addRemote = lib.lookupFunction<_AddRemoteNative, _AddRemoteDart>(
-          'rustgit_add_remote',
+          'branchi_add_remote',
         ),
         _setRemoteUrl =
             lib.lookupFunction<_SetRemoteUrlNative, _SetRemoteUrlDart>(
-          'rustgit_set_remote_url',
+          'branchi_set_remote_url',
         ),
         _removeRemote =
             lib.lookupFunction<_RemoveRemoteNative, _RemoveRemoteDart>(
-          'rustgit_remove_remote',
+          'branchi_remove_remote',
         ),
         _globalConfigGet = lib.lookupFunction<_GlobalConfigGetNative,
-            _GlobalConfigGetDart>('rustgit_global_config_get'),
+            _GlobalConfigGetDart>('branchi_global_config_get'),
         _globalConfigSet = lib.lookupFunction<_GlobalConfigSetNative,
-            _GlobalConfigSetDart>('rustgit_global_config_set'),
+            _GlobalConfigSetDart>('branchi_global_config_set'),
         _freeString = lib.lookupFunction<_FreeStringNative, _FreeStringDart>(
-          'rustgit_free_string',
+          'branchi_free_string',
         );
 
   static GitFfi? _instance;
@@ -657,10 +657,10 @@ class GitFfi {
   /// executable's directory looking for `target/<profile>/<libName>`.
   static Iterable<String> _candidatePaths() sync* {
     final libName = Platform.isWindows
-        ? 'rustgit_core.dll'
+        ? 'branchi_core.dll'
         : Platform.isMacOS
-            ? 'librustgit_core.dylib'
-            : 'librustgit_core.so';
+            ? 'libbranchi_core.dylib'
+            : 'libbranchi_core.so';
 
     yield libName;
 

@@ -4,7 +4,7 @@
 /// strings: a simple `key -> translated string` map per language instead of
 /// generated ARB/`intl` bindings, so new languages can be added by dropping
 /// in another map.
-library rustgit.l10n.translations;
+library branchi.l10n.translations;
 
 class LangInfo {
   const LangInfo({required this.code, required this.name, required this.rtl});
@@ -25,9 +25,9 @@ const Set<String> rtlLanguageCodes = {'ar', 'fa'};
 
 const Map<String, Map<String, String>> translations = {
   'en': {
-    'app_title': 'RustGit',
+    'app_title': 'Branchi',
     'new_tab': 'New tab',
-    'welcome': 'Welcome to RustGit',
+    'welcome': 'Welcome to Branchi',
     'pin_window': 'Keep window on top',
     'unpin_window': 'Unpin window',
     'settings': 'Settings',
@@ -92,7 +92,7 @@ const Map<String, Map<String, String>> translations = {
   'ar': {
     'app_title': 'راست‌غيت',
     'new_tab': 'علامة تبويب جديدة',
-    'welcome': 'مرحبًا بك في RustGit',
+    'welcome': 'مرحبًا بك في Branchi',
     'pin_window': 'إبقاء النافذة في المقدمة',
     'unpin_window': 'إلغاء التثبيت',
     'settings': 'الإعدادات',
@@ -157,7 +157,7 @@ const Map<String, Map<String, String>> translations = {
   'fa': {
     'app_title': 'راست‌گیت',
     'new_tab': 'برگه جدید',
-    'welcome': 'به RustGit خوش آمدید',
+    'welcome': 'به Branchi خوش آمدید',
     'pin_window': 'نگه‌داشتن پنجره در بالا',
     'unpin_window': 'برداشتن سنجاق',
     'settings': 'تنظیمات',
