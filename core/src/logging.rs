@@ -21,9 +21,16 @@ fn logs_dir() -> std::path::PathBuf {
 /// only the first call takes effect.
 pub fn init() {
     INIT.call_once(|| {
-        let file_spec = FileSpec::default()
-            .directory(logs_dir())
-            .basename("branchi-core");
+        let dir = logs_dir();
+        if let Err(err) = std::fs::create_dir_all(&dir) {
+            eprintln!(
+                "branchi-core: failed to create log directory {}: {err}",
+                dir.display()
+            );
+            return;
+        }
+
+        let file_spec = FileSpec::default().directory(dir).basename("branchi-core");
 
         let logger = Logger::try_with_str("info")
             .and_then(|logger| {
