@@ -416,7 +416,9 @@ impl GitRepo {
             .with_context(|| format!("remote not found: {remote_name}"))?;
 
         let mut callbacks = git2::RemoteCallbacks::new();
-        callbacks.credentials(Self::credentials_callback);
+        callbacks.credentials(|url, username, allowed| {
+            self.credentials_callback(url, username, allowed)
+        });
 
         let mut fetch_options = git2::FetchOptions::new();
         fetch_options.remote_callbacks(callbacks);
@@ -534,7 +536,9 @@ impl GitRepo {
             .with_context(|| format!("remote not found: {remote_name}"))?;
 
         let mut callbacks = git2::RemoteCallbacks::new();
-        callbacks.credentials(Self::credentials_callback);
+        callbacks.credentials(|url, username, allowed| {
+            self.credentials_callback(url, username, allowed)
+        });
 
         let mut push_options = git2::PushOptions::new();
         push_options.remote_callbacks(callbacks);
@@ -546,19 +550,19 @@ impl GitRepo {
         Ok(())
     }
 
-    /// Supplies credentials for a remote operation (fetch/push) using only
-    /// in-process libgit2 mechanisms: an SSH key from a running ssh-agent,
-    /// or the platform's native default credentials (e.g. Windows SSPI).
+    /// Supplies credentials for a remote operation (fetch/push): an SSH key
+    /// from a running ssh-agent for SSH remotes, the configured
+    /// `credential.helper` for HTTPS remotes (e.g. Git Credential Manager,
+    /// `osxkeychain`, `store`), or the platform's native default
+    /// credentials (e.g. Windows SSPI) as a last resort.
     ///
-    /// Deliberately does *not* call `git2::Cred::credential_helper`: that
-    /// API shells out to the external program configured as
-    /// `credential.helper` (spawning it via `std::process::Command`), which
-    /// on Windows briefly flashes a console window since this app has none
-    /// of its own. Every other git operation in this module goes through
-    /// libgit2 directly with no child processes; this keeps credential
-    /// resolution consistent with that.
+    /// On Windows, the helper process is spawned with `CREATE_NO_WINDOW` so
+    /// it doesn't flash a console window (this app has none of its own).
+    /// Elsewhere it goes through `git2::Cred::credential_helper` directly,
+    /// which has no such issue.
     fn credentials_callback(
-        _url: &str,
+        &self,
+        url: &str,
         username_from_url: Option<&str>,
         allowed_types: git2::CredentialType,
     ) -> std::result::Result<git2::Cred, git2::Error> {
@@ -569,6 +573,30 @@ impl GitRepo {
                 }
             }
         }
+
+        if allowed_types.contains(git2::CredentialType::USER_PASS_PLAINTEXT) {
+            #[cfg(windows)]
+            {
+                if let Some((username, password)) =
+                    windows_credential_helper(&self.repo, url, username_from_url)
+                {
+                    if let Ok(cred) = git2::Cred::userpass_plaintext(&username, &password) {
+                        return Ok(cred);
+                    }
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                if let Ok(config) = self.repo.config() {
+                    if let Ok(cred) =
+                        git2::Cred::credential_helper(&config, url, username_from_url)
+                    {
+                        return Ok(cred);
+                    }
+                }
+            }
+        }
+
         git2::Cred::default()
     }
 
@@ -682,6 +710,87 @@ pub fn set_global_identity(name: &str, email: &str) -> Result<()> {
         config.set_str("user.email", email)?;
     }
     Ok(())
+}
+
+/// Runs the repository's configured `credential.helper` to obtain a
+/// username/password for an HTTPS remote, the same protocol `git` itself
+/// uses to talk to a helper (`<cmd> get`, `key=value` lines on stdin,
+/// `username=`/`password=` lines read back from stdout).
+///
+/// Unlike `git2::Cred::credential_helper`, the helper process is spawned
+/// with `CREATE_NO_WINDOW` so it doesn't flash a console window in this
+/// GUI app, which has no console of its own.
+#[cfg(windows)]
+fn windows_credential_helper(
+    repo: &git2::Repository,
+    url: &str,
+    username_from_url: Option<&str>,
+) -> Option<(String, String)> {
+    use std::io::Write;
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let config = repo.config().ok()?;
+    let helper = config.get_string("credential.helper").ok()?;
+    if helper.trim().is_empty() {
+        return None;
+    }
+
+    let command_line = if let Some(script) = helper.strip_prefix('!') {
+        script.to_string()
+    } else if helper.contains('/') || helper.contains('\\') {
+        helper
+    } else {
+        format!("git credential-{helper}")
+    };
+
+    let mut parts = command_line.split_whitespace();
+    let program = parts.next()?;
+    let mut child = Command::new(program)
+        .args(parts)
+        .arg("get")
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+
+    {
+        let stdin = child.stdin.as_mut()?;
+        if let Some(rest) = url.split("://").nth(1) {
+            let protocol = url.split("://").next().unwrap_or("https");
+            let host = rest.split('/').next().unwrap_or_default();
+            writeln!(stdin, "protocol={protocol}").ok()?;
+            writeln!(stdin, "host={host}").ok()?;
+        }
+        if let Some(username) = username_from_url {
+            writeln!(stdin, "username={username}").ok()?;
+        }
+        writeln!(stdin).ok()?;
+    }
+
+    let output = child.wait_with_output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let mut username = username_from_url.map(str::to_string);
+    let mut password = None;
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if let Some(value) = line.strip_prefix("username=") {
+            username = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix("password=") {
+            password = Some(value.to_string());
+        }
+    }
+
+    match (username, password) {
+        (Some(u), Some(p)) => Some((u, p)),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
