@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'file_logger.dart';
+
 /// A single recorded git action: what ran, when, and whether it succeeded.
 class ActionLogEntry {
   ActionLogEntry({
@@ -46,6 +48,9 @@ class ActionLog extends ChangeNotifier {
     );
     if (_entries.length > _maxEntries) {
       _entries.removeRange(_maxEntries, _entries.length);
+    }
+    if (!success) {
+      FileLogger.log('Action failed: $action${detail != null ? ' - $detail' : ''}');
     }
     notifyListeners();
   }

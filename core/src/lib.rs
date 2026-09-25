@@ -8,6 +8,7 @@
 pub mod db;
 pub mod ffi;
 pub mod git;
+pub mod logging;
 
 pub fn welcome_message() -> String {
     "Welcome to Branchi".to_string()

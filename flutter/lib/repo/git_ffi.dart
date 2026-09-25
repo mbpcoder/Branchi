@@ -16,6 +16,9 @@ class GitFfiException implements Exception {
   String toString() => message;
 }
 
+typedef _InitLoggingNative = Void Function();
+typedef _InitLoggingDart = void Function();
+
 typedef _InitNative = Pointer<Utf8> Function(Pointer<Utf8> path);
 typedef _InitDart = Pointer<Utf8> Function(Pointer<Utf8> path);
 
@@ -193,7 +196,9 @@ typedef _FreeStringDart = void Function(Pointer<Utf8> ptr);
 /// bridged surface grows much beyond init/clone/open, switch to codegen.
 class GitFfi {
   GitFfi._(DynamicLibrary lib)
-      : _init = lib.lookupFunction<_InitNative, _InitDart>('branchi_init'),
+      : _initLogging = lib.lookupFunction<_InitLoggingNative,
+            _InitLoggingDart>('branchi_init_logging'),
+        _init = lib.lookupFunction<_InitNative, _InitDart>('branchi_init'),
         _clone =
             lib.lookupFunction<_CloneNative, _CloneDart>('branchi_clone'),
         _isRepository = lib.lookupFunction<_IsRepositoryNative,
@@ -271,9 +276,12 @@ class GitFfi {
     if (_instance != null) return _instance;
     final lib = _tryLoadLibrary();
     if (lib == null) return null;
-    return _instance = GitFfi._(lib);
+    final instance = GitFfi._(lib);
+    instance._initLogging();
+    return _instance = instance;
   }
 
+  final _InitLoggingDart _initLogging;
   final _InitDart _init;
   final _CloneDart _clone;
   final _IsRepositoryDart _isRepository;

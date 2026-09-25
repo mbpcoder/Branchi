@@ -11,14 +11,28 @@ use crate::git::{self, GitRepo};
 use serde::Serialize;
 use std::ffi::{c_char, CStr, CString};
 
+/// Initializes the rotating file logger (`logs/branchi-core.log`, 30 days
+/// of history). Safe to call more than once and from either side of the
+/// FFI boundary; every other function in this module also lazily
+/// initializes it, so calling this explicitly is optional but recommended
+/// as early as possible during app startup.
+#[no_mangle]
+pub extern "C" fn branchi_init_logging() {
+    crate::logging::init();
+}
+
 /// Converts a `Result` into the null-on-success / error-string-on-failure
 /// convention used across this FFI surface.
 fn result_to_c_string<T>(result: anyhow::Result<T>) -> *mut c_char {
+    crate::logging::init();
     match result {
         Ok(_) => std::ptr::null_mut(),
-        Err(err) => CString::new(err.to_string())
-            .unwrap_or_else(|_| CString::new("unknown error").unwrap())
-            .into_raw(),
+        Err(err) => {
+            log::error!("{err:?}");
+            CString::new(err.to_string())
+                .unwrap_or_else(|_| CString::new("unknown error").unwrap())
+                .into_raw()
+        }
     }
 }
 
@@ -29,7 +43,10 @@ fn result_to_c_string<T>(result: anyhow::Result<T>) -> *mut c_char {
 fn result_to_json_c_string<T: Serialize>(result: anyhow::Result<T>) -> *mut c_char {
     let payload = match result {
         Ok(value) => serde_json::json!({ "ok": value }),
-        Err(err) => serde_json::json!({ "error": err.to_string() }),
+        Err(err) => {
+            log::error!("{err:?}");
+            serde_json::json!({ "error": err.to_string() })
+        }
     };
     let text = serde_json::to_string(&payload)
         .unwrap_or_else(|_| "{\"error\":\"failed to serialize response\"}".to_string());
