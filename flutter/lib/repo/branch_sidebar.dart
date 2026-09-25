@@ -6,10 +6,11 @@ import 'models.dart';
 import 'remotes_dialog.dart';
 
 /// Auto-refresh interval choices offered by the watch dropdown, in minutes.
-const List<int> kBranchWatchIntervalsMinutes = [5, 10, 15, 30, 45, 60];
+const List<int> kBranchWatchIntervalsMinutes = [1, 2, 3, 4, 5, 10, 15, 30, 45, 60];
 
 String branchWatchIntervalLabel(int minutes) {
   if (minutes == 60) return '1 hour';
+  if (minutes == 1) return '1 minute';
   return '$minutes minutes';
 }
 
