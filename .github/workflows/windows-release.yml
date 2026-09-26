@@ -2,7 +2,7 @@ name: Windows release build
 
 on:
   push:
-    branches: [main]
+    tags: ["*"]
 
 permissions:
   contents: write
