@@ -7,6 +7,13 @@ a **Rust** core with a **Flutter** UI on top.
 - `flutter/` — Flutter application (the UI). Right now it just shows a
   "Welcome to Branchi" screen; this is the starting point for the real client.
 
+## Screenshots
+
+<p>
+  <img src="docs/screenshots/screenshot-1.png" width="400" alt="Branchi branch history view" />
+  <img src="docs/screenshots/screenshot-2.png" width="400" alt="Branchi file editor view" />
+</p>
+
 ## Prerequisites (Windows 11)
 
 1. **Rust** — install via [rustup](https://rustup.rs):
