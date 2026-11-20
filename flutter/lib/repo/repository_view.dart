@@ -106,8 +106,7 @@ class RepositoryViewState extends State<RepositoryView> {
     _lastSection = _controller.section;
     _controller.addListener(_onControllerChanged);
     _controller.watcher.addListener(_onWatcherChanged);
-    _repositoryChangedSubscription =
-        _controller.repositoryChanged.listen((_) {
+    _repositoryChangedSubscription = _controller.repositoryChanged.listen((_) {
       if (mounted) _loadRepository(showSpinner: false);
     });
   }
@@ -173,15 +172,19 @@ class RepositoryViewState extends State<RepositoryView> {
 
   void _resizeSidebar(double delta) {
     setState(() {
-      _sidebarWidth = (_sidebarWidth + delta)
-          .clamp(_minColumnWidth, _maxColumnWidth);
+      _sidebarWidth = (_sidebarWidth + delta).clamp(
+        _minColumnWidth,
+        _maxColumnWidth,
+      );
     });
   }
 
   void _resizeCommitList(double delta) {
     setState(() {
-      _commitListWidth = (_commitListWidth + delta)
-          .clamp(_minColumnWidth, _maxColumnWidth);
+      _commitListWidth = (_commitListWidth + delta).clamp(
+        _minColumnWidth,
+        _maxColumnWidth,
+      );
     });
   }
 
@@ -365,7 +368,9 @@ class RepositoryViewState extends State<RepositoryView> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _selectCommit(CommitEntry commit) async {
@@ -418,6 +423,23 @@ class RepositoryViewState extends State<RepositoryView> {
   }
 
   Widget _buildGitView(BuildContext context) {
+    // Changes is its own full-width screen: file lists + diff + commit box.
+    if (_isViewingChanges) {
+      return WorkingChangesDetail(
+        branchName: _controller.currentBranch,
+        status: _status,
+        isLoading: _isStatusLoading,
+        error: _statusError,
+        canPush: _branches.any((b) => !b.isRemote && b.isHead),
+        onStage: _stage,
+        onUnstage: _unstage,
+        onRevert: _revertFile,
+        onCommit: _commit,
+        onCommitAndPush: _commitAndPush,
+        onOpenFile: (entry) => _openFileInEditor(entry.path),
+        onRefresh: () => unawaited(_loadStatus()),
+      );
+    }
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -472,31 +494,15 @@ class RepositoryViewState extends State<RepositoryView> {
               PanelLayoutStore.saveCommitListWidth(_commitListWidth),
         ),
         Expanded(
-          child: _isViewingChanges
-              ? WorkingChangesDetail(
-                  branchName: _controller.currentBranch,
-                  status: _status,
-                  isLoading: _isStatusLoading,
-                  error: _statusError,
-                  canPush: _branches.any((b) => !b.isRemote && b.isHead),
-                  onStage: _stage,
-                  onUnstage: _unstage,
-                  onRevert: _revertFile,
-                  onCommit: _commit,
-                  onCommitAndPush: _commitAndPush,
-                  onOpenFile: (entry) => _openFileInEditor(entry.path),
-                  onRefresh: () => unawaited(_loadStatus()),
-                )
-              : CommitDetail(
-                  commit: _selectedCommit,
-                  diffFiles: _diffFiles,
-                  isLoading: _isDiffLoading,
-                  error: _diffError,
-                  selectedFilePath: _selectedFilePath,
-                  onSelectFile: (path) =>
-                      setState(() => _selectedFilePath = path),
-                  onOpenFile: _openFileInEditor,
-                ),
+          child: CommitDetail(
+            commit: _selectedCommit,
+            diffFiles: _diffFiles,
+            isLoading: _isDiffLoading,
+            error: _diffError,
+            selectedFilePath: _selectedFilePath,
+            onSelectFile: (path) => setState(() => _selectedFilePath = path),
+            onOpenFile: _openFileInEditor,
+          ),
         ),
       ],
     );

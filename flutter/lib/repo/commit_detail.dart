@@ -242,8 +242,7 @@ class _FileRowState extends State<_FileRow> {
   Widget build(BuildContext context) {
     final b = context.branchi;
     final file = widget.file;
-    final pathColor =
-        widget.selected || !widget.dimUnselected ? b.fg : b.muted;
+    final pathColor = widget.selected || !widget.dimUnselected ? b.fg : b.muted;
     final (statusLetter, statusLabel, statusColor) = switch (file.status) {
       FileChangeStatus.new_ => ('A', 'Added', b.add),
       FileChangeStatus.modified => ('M', 'Modified', b.mod),
@@ -288,11 +287,15 @@ class _FileRowState extends State<_FileRow> {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Text('+${file.additions}',
-                      style: TextStyle(fontSize: 12, color: b.add)),
+                  Text(
+                    '+${file.additions}',
+                    style: TextStyle(fontSize: 12, color: b.add),
+                  ),
                   const SizedBox(width: 12),
-                  Text('−${file.deletions}',
-                      style: TextStyle(fontSize: 12, color: b.del)),
+                  Text(
+                    '−${file.deletions}',
+                    style: TextStyle(fontSize: 12, color: b.del),
+                  ),
                   const SizedBox(width: 8),
                   Opacity(
                     opacity: _hovered ? 1 : 0,
@@ -301,8 +304,10 @@ class _FileRowState extends State<_FileRow> {
                       icon: Icon(Icons.open_in_new, size: 14, color: b.muted),
                       visualDensity: VisualDensity.compact,
                       padding: EdgeInsets.zero,
-                      constraints:
-                          const BoxConstraints(minWidth: 24, minHeight: 24),
+                      constraints: const BoxConstraints(
+                        minWidth: 24,
+                        minHeight: 24,
+                      ),
                       onPressed: widget.onOpen,
                     ),
                   ),
@@ -337,7 +342,10 @@ List<_DiffLine> _parsePatch(String patch) {
   if (raw.isNotEmpty && raw.last.isEmpty) raw.removeLast();
 
   final lines = <_DiffLine>[];
-  var inHunk = false;
+  // The Rust core emits bare +/-/space lines without `@@` hunk headers;
+  // in that case every line is content and line numbers are unknown.
+  final hasHunks = raw.any(hunkHeader.hasMatch);
+  var inHunk = !hasHunks;
   var oldNo = 0;
   var newNo = 0;
   for (final line in raw) {
@@ -357,11 +365,21 @@ List<_DiffLine> _parsePatch(String patch) {
       continue;
     }
     if (line.startsWith('+')) {
-      lines.add(_DiffLine(_LineKind.add, newNo++, line.substring(1)));
+      lines.add(
+        _DiffLine(_LineKind.add, hasHunks ? newNo++ : null, line.substring(1)),
+      );
     } else if (line.startsWith('-')) {
-      lines.add(_DiffLine(_LineKind.del, oldNo++, line.substring(1)));
+      lines.add(
+        _DiffLine(_LineKind.del, hasHunks ? oldNo++ : null, line.substring(1)),
+      );
     } else if (line.startsWith(' ')) {
-      lines.add(_DiffLine(_LineKind.context, newNo, line.substring(1)));
+      lines.add(
+        _DiffLine(
+          _LineKind.context,
+          hasHunks ? newNo : null,
+          line.substring(1),
+        ),
+      );
       oldNo++;
       newNo++;
     } else if (line.isNotEmpty) {
@@ -433,8 +451,7 @@ class _PatchViewState extends State<_PatchView> {
     )..layout();
     final charWidth = painter.width;
     painter.dispose();
-    final contentWidth =
-        _numberWidth + _signWidth + _maxChars * charWidth + 24;
+    final contentWidth = _numberWidth + _signWidth + _maxChars * charWidth + 24;
 
     return Container(
       decoration: BoxDecoration(

@@ -70,33 +70,38 @@ class AppTopBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Text(
-            'Branchi',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              letterSpacing: -0.13,
-              color: b.fg,
+          Expanded(
+            child: Row(
+              children: [
+                Text(
+                  'Branchi',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.13,
+                    color: b.fg,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text('/', style: TextStyle(color: b.muted)),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: _RepoSwitcher(
+                    tabs: tabs,
+                    activeIndex: activeIndex,
+                    onSelectTab: onSelectTab,
+                    onCloseTab: onCloseTab,
+                    onAddTab: onAddTab,
+                  ),
+                ),
+                if (controller != null) ...[
+                  const SizedBox(width: 12),
+                  _BranchPill(controller: controller),
+                  const SizedBox(width: 32),
+                  _SectionTabs(controller: controller),
+                ],
+              ],
             ),
           ),
-          const SizedBox(width: 12),
-          Text('/', style: TextStyle(color: b.muted)),
-          const SizedBox(width: 6),
-          Flexible(
-            child: _RepoSwitcher(
-              tabs: tabs,
-              activeIndex: activeIndex,
-              onSelectTab: onSelectTab,
-              onCloseTab: onCloseTab,
-              onAddTab: onAddTab,
-            ),
-          ),
-          if (controller != null) ...[
-            const SizedBox(width: 12),
-            _BranchPill(controller: controller),
-            const SizedBox(width: 32),
-            _SectionTabs(controller: controller),
-          ],
-          const Spacer(),
           if (controller != null) ...[
             AutoPullButton(
               watcher: controller.watcher,
@@ -154,9 +159,7 @@ class _RepoSwitcher extends StatelessWidget {
     final b = context.branchi;
     return MenuAnchor(
       alignmentOffset: const Offset(0, 6),
-      style: const MenuStyle(
-        minimumSize: WidgetStatePropertyAll(Size(220, 0)),
-      ),
+      style: const MenuStyle(minimumSize: WidgetStatePropertyAll(Size(220, 0))),
       menuChildren: [
         for (var i = 0; i < tabs.length; i++)
           MenuItemButton(
@@ -174,8 +177,9 @@ class _RepoSwitcher extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: i == activeIndex ? b.fg : b.muted,
-                  fontWeight:
-                      i == activeIndex ? FontWeight.w500 : FontWeight.w400,
+                  fontWeight: i == activeIndex
+                      ? FontWeight.w500
+                      : FontWeight.w400,
                 ),
               ),
             ),
@@ -237,9 +241,7 @@ class _BranchPill extends StatelessWidget {
       ..sort((x, y) => x.name.compareTo(y.name));
     return MenuAnchor(
       alignmentOffset: const Offset(0, 6),
-      style: const MenuStyle(
-        minimumSize: WidgetStatePropertyAll(Size(200, 0)),
-      ),
+      style: const MenuStyle(minimumSize: WidgetStatePropertyAll(Size(200, 0))),
       menuChildren: [
         for (final branch in local)
           MenuItemButton(
