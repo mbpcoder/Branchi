@@ -179,7 +179,7 @@ class _BranchWatcherSectionState extends State<BranchWatcherSection> {
       );
     }
     final current = controller.currentBranch;
-    final selected = _branches ?? {if (current != null) current};
+    final selected = _branches ?? {?current};
     return BorderedList(
       children: [
         for (final branch in locals)
@@ -248,13 +248,12 @@ class _AutoPullStatus extends StatelessWidget {
         );
         final lastText = last == null
             ? null
-            : translate('watcher_last_pulled').replaceAll('{time}', _hhmm(last));
+            : translate(
+                'watcher_last_pulled',
+              ).replaceAll('{time}', _hhmm(last));
         final interval = watcher.intervalMinutes;
         if (interval == null) {
-          return Text(
-            [translate('auto_pull_disabled'), if (lastText != null) lastText]
-                .join(' · '),
-          );
+          return Text([translate('auto_pull_disabled'), ?lastText].join(' · '));
         }
         if (watcher.isPulling || controller.isPulling) {
           return Text(translate('watcher_pulling'));
@@ -268,7 +267,10 @@ class _AutoPullStatus extends StatelessWidget {
           TextSpan(
             children: [
               TextSpan(text: parts.first),
-              TextSpan(text: time, style: b.mono(fontSize: 12, color: b.muted)),
+              TextSpan(
+                text: time,
+                style: b.mono(fontSize: 12, color: b.muted),
+              ),
               if (parts.length > 1) TextSpan(text: parts.sublist(1).join()),
               if (lastText != null) TextSpan(text: ' · $lastText'),
             ],

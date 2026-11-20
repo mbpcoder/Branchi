@@ -43,16 +43,16 @@ class WatcherPreferences {
   WatcherPreferences._();
 
   static final ValueNotifier<bool> onlyWhenClean = ValueNotifier<bool>(true);
-  static final ValueNotifier<bool> notifyOnNewCommits =
-      ValueNotifier<bool>(true);
+  static final ValueNotifier<bool> notifyOnNewCommits = ValueNotifier<bool>(
+    true,
+  );
 
   /// Fires for every automatic pull that brought in new commits while
   /// [notifyOnNewCommits] is on. A host widget with a [ScaffoldMessenger]
   /// can listen and show a SnackBar.
   static final StreamController<WatcherNotification> _notifications =
       StreamController<WatcherNotification>.broadcast();
-  static Stream<WatcherNotification> get notifications =>
-      _notifications.stream;
+  static Stream<WatcherNotification> get notifications => _notifications.stream;
 
   /// When each repository was last pulled by [runWatchedPull].
   static final Map<String, DateTime> _lastPulledAt = {};
@@ -93,7 +93,10 @@ class WatcherPreferences {
     }
   }
 
-  static Future<void> saveBranches(String repoPath, Set<String> branches) async {
+  static Future<void> saveBranches(
+    String repoPath,
+    Set<String> branches,
+  ) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       _branchesKeyPrefix + repoPath,
@@ -167,7 +170,8 @@ Future<void> runWatchedPull({
   }
 
   final selected = await WatcherPreferences.loadBranches(repoPath);
-  final pullHead = selected == null ||
+  final pullHead =
+      selected == null ||
       (currentBranch != null && selected.contains(currentBranch));
 
   if (selected != null) {

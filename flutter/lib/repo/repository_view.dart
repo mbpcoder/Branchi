@@ -474,6 +474,7 @@ class RepositoryViewState extends State<RepositoryView> {
         Expanded(
           child: _isViewingChanges
               ? WorkingChangesDetail(
+                  branchName: _controller.currentBranch,
                   status: _status,
                   isLoading: _isStatusLoading,
                   error: _statusError,

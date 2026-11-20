@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/app_locale.dart';
+import '../theme/app_theme.dart';
 import 'git_actions.dart';
 import 'models.dart';
 
@@ -158,14 +159,21 @@ class _RemotesDialogState extends State<_RemotesDialog> {
   @override
   Widget build(BuildContext context) {
     final remotes = _remotes;
+    final b = context.branchi;
     return AlertDialog(
       title: Text(translate('git_remotes')),
       content: SizedBox(
-        width: 420,
+        width: 480,
         child: remotes == null
             ? const Padding(
                 padding: EdgeInsets.all(24),
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(
+                  child: SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
               )
             : Column(
                 mainAxisSize: MainAxisSize.min,
@@ -175,35 +183,56 @@ class _RemotesDialogState extends State<_RemotesDialog> {
                       padding: const EdgeInsets.only(bottom: 8),
                       child: Text(
                         _error!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
+                        style: TextStyle(color: b.del, fontSize: 12),
                       ),
                     ),
                   if (remotes.isEmpty && _error == null)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      child: Text(translate('no_remotes_configured')),
+                      child: Text(
+                        translate('no_remotes_configured'),
+                        style: TextStyle(color: b.muted),
+                      ),
                     ),
-                  for (final remote in remotes)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.cloud_outlined),
-                      title: Text(remote.name),
-                      subtitle: Text(remote.url),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
+                  for (var i = 0; i < remotes.length; i++)
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          top: i == 0 ? BorderSide.none : b.hairline,
+                        ),
+                      ),
+                      child: Row(
                         children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  remotes[i].name,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  remotes[i].url,
+                                  style: b.mono(fontSize: 12, color: b.muted),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
                           IconButton(
                             icon: const Icon(Icons.edit_outlined),
                             tooltip: translate('edit_remote'),
                             onPressed: () =>
-                                _addOrEditRemote(existing: remote),
+                                _addOrEditRemote(existing: remotes[i]),
                           ),
                           IconButton(
                             icon: const Icon(Icons.delete_outline),
                             tooltip: translate('remove_remote'),
-                            onPressed: () => _removeRemote(remote),
+                            onPressed: () => _removeRemote(remotes[i]),
                           ),
                         ],
                       ),
@@ -214,7 +243,7 @@ class _RemotesDialogState extends State<_RemotesDialog> {
       actions: [
         TextButton.icon(
           onPressed: () => _addOrEditRemote(),
-          icon: const Icon(Icons.add),
+          icon: const Icon(Icons.add, size: 14),
           label: Text(translate('add_remote')),
         ),
         TextButton(

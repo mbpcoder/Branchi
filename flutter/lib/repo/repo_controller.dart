@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../settings/watcher_preferences.dart';
 import 'branch_watcher.dart';
 import 'git_actions.dart';
 import 'models.dart';
@@ -133,9 +134,11 @@ class RepoController extends ChangeNotifier {
     return result;
   }
 
-  Future<void> _autoPull() async {
-    await _pull();
-  }
+  Future<void> _autoPull() => runWatchedPull(
+        repoPath: repoPath,
+        currentBranch: _currentBranch,
+        pullCurrent: _pull,
+      );
 
   Future<GitActionResult> _pull() async {
     if (_isPulling) return const GitActionResult.success();

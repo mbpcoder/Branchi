@@ -5,7 +5,6 @@ import 'package:window_manager/window_manager.dart';
 
 import '../app_state_store.dart';
 import '../l10n/app_locale.dart';
-import '../l10n/translations.dart';
 import '../logs/logs_panel.dart';
 import '../models/repo_tab.dart';
 import '../repo/repository_view.dart';

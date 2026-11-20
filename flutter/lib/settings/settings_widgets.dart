@@ -63,7 +63,7 @@ class SettingsGroup extends StatelessWidget {
                 style: const TextStyle(fontWeight: FontWeight.w500),
               ),
             ),
-            if (trailing != null) trailing!,
+            ?trailing,
           ],
         ),
         const SizedBox(height: 12),
@@ -144,8 +144,9 @@ class SettingsToggleRow extends StatelessWidget {
                       title,
                       style: TextStyle(
                         color: enabled ? b.fg : b.muted,
-                        fontWeight:
-                            emphasized ? FontWeight.w500 : FontWeight.w400,
+                        fontWeight: emphasized
+                            ? FontWeight.w500
+                            : FontWeight.w400,
                       ),
                     ),
                     if (hintWidget != null || hint != null) ...[
@@ -185,16 +186,16 @@ class MiniSwitch extends StatelessWidget {
       child: GestureDetector(
         onTap: enabled ? () => onChanged!(!value) : null,
         child: MouseRegion(
-          cursor:
-              enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+          cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 140),
             width: 34,
             height: 20,
             padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
-              color: (value ? b.accent : b.off)
-                  .withValues(alpha: enabled ? 1 : 0.5),
+              color: (value ? b.accent : b.off).withValues(
+                alpha: enabled ? 1 : 0.5,
+              ),
               borderRadius: BorderRadius.circular(999),
             ),
             child: AnimatedAlign(
@@ -285,7 +286,9 @@ class _Segment extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(6),
-          hoverColor: selected ? Colors.transparent : b.bg.withValues(alpha: 0.4),
+          hoverColor: selected
+              ? Colors.transparent
+              : b.bg.withValues(alpha: 0.4),
           splashColor: Colors.transparent,
           child: SizedBox(
             height: 32,
@@ -296,8 +299,8 @@ class _Segment extends StatelessWidget {
                   color: onTap == null
                       ? b.off
                       : selected
-                          ? b.fg
-                          : b.muted,
+                      ? b.fg
+                      : b.muted,
                   fontWeight: selected ? FontWeight.w500 : FontWeight.w400,
                 ),
               ),
