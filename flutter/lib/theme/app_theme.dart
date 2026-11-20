@@ -314,8 +314,8 @@ class AppTheme {
       labelSmall: ts(11, FontWeight.w500).copyWith(color: c.muted),
     );
 
-    final buttonPadding =
-        const EdgeInsets.symmetric(horizontal: 12, vertical: 6);
+    const buttonPadding =
+        EdgeInsets.symmetric(horizontal: 12, vertical: 6);
     const buttonMinSize = Size(0, 32);
     final buttonText = ts(kBaseFontSize, FontWeight.w500);
     final buttonShape = RoundedRectangleBorder(borderRadius: radius6);
@@ -444,7 +444,6 @@ class AppTheme {
         style: TextButton.styleFrom(
           foregroundColor: c.fg,
           disabledForegroundColor: c.off,
-          overlayColor: c.fg,
           padding: buttonPadding,
           minimumSize: buttonMinSize,
           textStyle: buttonText,

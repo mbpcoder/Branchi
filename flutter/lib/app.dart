@@ -17,30 +17,26 @@ class BranchiApp extends StatelessWidget {
         return ValueListenableBuilder<ThemeMode>(
           valueListenable: AppTheme.themeMode,
           builder: (context, themeMode, _) {
-            return MaterialApp(
-              title: 'Branchi',
-              locale: Locale(languageCode),
-              supportedLocales:
-                  supportedLanguages.map((lang) => Locale(lang.code)),
-              localizationsDelegates: const [
-                GlobalMaterialLocalizations.delegate,
-                GlobalWidgetsLocalizations.delegate,
-                GlobalCupertinoLocalizations.delegate,
-              ],
-              themeMode: themeMode,
-              theme: ThemeData(
-                colorScheme:
-                    ColorScheme.fromSeed(seedColor: Colors.deepOrange),
-                useMaterial3: true,
-              ),
-              darkTheme: ThemeData(
-                colorScheme: ColorScheme.fromSeed(
-                  seedColor: Colors.deepOrange,
-                  brightness: Brightness.dark,
-                ),
-                useMaterial3: true,
-              ),
-              home: const WelcomeScreen(),
+            return ValueListenableBuilder<Color>(
+              valueListenable: AppTheme.accent,
+              builder: (context, accent, _) {
+                return MaterialApp(
+                  title: 'Branchi',
+                  debugShowCheckedModeBanner: false,
+                  locale: Locale(languageCode),
+                  supportedLocales:
+                      supportedLanguages.map((lang) => Locale(lang.code)),
+                  localizationsDelegates: const [
+                    GlobalMaterialLocalizations.delegate,
+                    GlobalWidgetsLocalizations.delegate,
+                    GlobalCupertinoLocalizations.delegate,
+                  ],
+                  themeMode: themeMode,
+                  theme: AppTheme.light(accent),
+                  darkTheme: AppTheme.dark(accent),
+                  home: const WelcomeScreen(),
+                );
+              },
             );
           },
         );

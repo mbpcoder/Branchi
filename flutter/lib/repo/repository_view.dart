@@ -5,14 +5,13 @@ import 'package:path/path.dart' as p;
 
 import '../code/code_view.dart';
 import 'branch_sidebar.dart';
-import 'branch_watch_store.dart';
 import 'column_resize_handle.dart';
 import 'commit_detail.dart';
 import 'commit_list.dart';
 import 'git_actions.dart';
-import 'mode_rail.dart';
 import 'models.dart';
 import 'panel_layout_store.dart';
+import 'repo_controller.dart';
 import 'working_changes_panel.dart';
 
 const double _defaultSidebarWidth = 220;
@@ -20,27 +19,27 @@ const double _defaultCommitListWidth = 360;
 const double _minColumnWidth = 160;
 const double _maxColumnWidth = 640;
 
-/// The main view for an opened repository: a branch sidebar, the commit
-/// log, and a detail/diff pane for the selected commit.
+/// The main view for an opened repository. Which section is shown
+/// (History: branches + commit log + commit detail; Changes: working
+/// changes; Files: file tree + editor) is driven by [controller]'s
+/// [RepoController.section], switched from the window's top bar.
 class RepositoryView extends StatefulWidget {
   const RepositoryView({
     super.key,
     required this.path,
+    required this.controller,
     this.onLanguageChanged,
-    this.onBranchInfoChanged,
   });
 
   final String path;
 
+  /// Shared with the top bar: section, branch info, changes count, the
+  /// auto-pull watcher and remote actions.
+  final RepoController controller;
+
   /// Forwarded to the Code tab so the app's bottom bar can show the active
   /// file's detected type.
   final ValueChanged<String?>? onLanguageChanged;
-
-  /// Called whenever the branch list or current (HEAD) branch changes, so
-  /// the app's bottom bar can show/update the current branch and offer a
-  /// quick-switch dropdown.
-  final void Function(String? headBranch, List<BranchEntry> branches)?
-      onBranchInfoChanged;
 
   @override
   State<RepositoryView> createState() => RepositoryViewState();
@@ -61,101 +60,100 @@ class RepositoryViewState extends State<RepositoryView> {
   List<StatusEntry> _status = [];
   bool _isStatusLoading = false;
   String? _statusError;
-  bool _isViewingChanges = false;
 
   double _sidebarWidth = _defaultSidebarWidth;
   double _commitListWidth = _defaultCommitListWidth;
 
-  RepoViewMode _mode = RepoViewMode.git;
   final GlobalKey<CodeViewState> _codeViewKey = GlobalKey();
 
-  // Auto-refresh ("watch") of the current branch. Owned here, rather than by
-  // the branch sidebar, so it keeps running even while the Code tab is open
-  // and the sidebar isn't mounted.
-  int? _watchIntervalMinutes;
-  Timer? _watchTimer;
-  bool _isUpdatingCurrentBranch = false;
+  StreamSubscription<void>? _repositoryChangedSubscription;
+  late RepoSection _lastSection;
+
+  RepoController get _controller => widget.controller;
+  RepoSection get _section => _controller.section;
+  bool get _isViewingChanges => _section == RepoSection.changes;
 
   @override
   void initState() {
     super.initState();
+    _attachController();
     _loadRepository();
     _loadPanelLayout();
-    _loadWatchInterval();
   }
 
   @override
   void didUpdateWidget(covariant RepositoryView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      _detachController(oldWidget.controller);
+      _attachController();
+    }
     if (oldWidget.path != widget.path) {
       _selectedCommit = null;
       _diffFiles = [];
       _selectedFilePath = null;
       _loadRepository();
-      _loadWatchInterval();
     }
   }
 
   @override
   void dispose() {
-    _watchTimer?.cancel();
+    _detachController(widget.controller);
     super.dispose();
   }
 
-  Future<void> _loadWatchInterval() async {
-    final repoPath = widget.path;
-    final minutes = await BranchWatchStore.loadIntervalMinutes(repoPath);
-    if (!mounted || repoPath != widget.path) return;
-    setState(() => _watchIntervalMinutes = minutes);
-    _restartWatchTimer();
-  }
-
-  void _restartWatchTimer() {
-    _watchTimer?.cancel();
-    final minutes = _watchIntervalMinutes;
-    if (minutes == null) return;
-    _watchTimer = Timer.periodic(Duration(minutes: minutes), (_) {
-      _updateCurrentBranch();
+  void _attachController() {
+    _lastSection = _controller.section;
+    _controller.addListener(_onControllerChanged);
+    _controller.watcher.addListener(_onWatcherChanged);
+    _repositoryChangedSubscription =
+        _controller.repositoryChanged.listen((_) {
+      if (mounted) _loadRepository(showSpinner: false);
     });
   }
 
-  void _setWatchInterval(int? minutes) {
-    if (minutes == _watchIntervalMinutes) return;
-    setState(() => _watchIntervalMinutes = minutes);
-    _restartWatchTimer();
-    BranchWatchStore.saveIntervalMinutes(widget.path, minutes);
+  void _detachController(RepoController controller) {
+    controller.removeListener(_onControllerChanged);
+    controller.watcher.removeListener(_onWatcherChanged);
+    _repositoryChangedSubscription?.cancel();
+    _repositoryChangedSubscription = null;
   }
 
-  Future<void> _updateCurrentBranch() async {
-    if (_isUpdatingCurrentBranch) return;
-    BranchEntry? head;
-    for (final branch in _branches) {
-      if (branch.isHead) {
-        head = branch;
-        break;
+  void _onWatcherChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// Reacts to section switches from the top bar (and rebuilds for branch /
+  /// busy-state changes).
+  void _onControllerChanged() {
+    if (!mounted) return;
+    final previous = _lastSection;
+    final current = _controller.section;
+    _lastSection = current;
+    if (previous != current) {
+      if (previous == RepoSection.files) widget.onLanguageChanged?.call(null);
+      if (current == RepoSection.changes) {
+        _selectedCommit = null;
+        unawaited(_loadStatus());
+      } else if (current == RepoSection.history &&
+          _selectedCommit == null &&
+          _commits.isNotEmpty) {
+        _selectCommit(_commits.first);
       }
     }
-    if (head == null) return;
-    setState(() => _isUpdatingCurrentBranch = true);
-    try {
-      await GitActions.updateBranch(
-        widget.path,
-        head.name,
-        isRemote: head.isRemote,
-      );
-      if (!mounted) return;
-      await _loadRepository();
-    } finally {
-      if (mounted) setState(() => _isUpdatingCurrentBranch = false);
-    }
+    setState(() {});
   }
 
-  /// Checks out [branchName], e.g. from the bottom bar's branch switcher.
+  void _setSection(RepoSection section) {
+    _controller.section = section;
+  }
+
+  /// Checks out [branchName] and reloads.
   Future<void> checkoutBranch(String branchName) async {
     final result = await GitActions.checkoutBranch(widget.path, branchName);
     if (!mounted) return;
     if (result.isSuccess) {
-      await _loadRepository();
+      await _loadRepository(showSpinner: false);
     } else {
       _showError(result.error!);
     }
@@ -187,9 +185,12 @@ class RepositoryViewState extends State<RepositoryView> {
     });
   }
 
-  Future<void> _loadRepository() async {
+  /// Loads the log and branches. [showSpinner] replaces the whole view with
+  /// a progress indicator, which is only wanted for the initial load, not
+  /// for background refreshes (e.g. after an auto-pull).
+  Future<void> _loadRepository({bool showSpinner = true}) async {
     setState(() {
-      _isLoading = true;
+      if (showSpinner || _loadError != null) _isLoading = true;
       _loadError = null;
     });
 
@@ -207,7 +208,11 @@ class RepositoryViewState extends State<RepositoryView> {
       _notifyBranchInfo();
       unawaited(_loadStatus());
       if (_commits.isNotEmpty && !_isViewingChanges) {
-        _selectCommit(_commits.first);
+        final previous = _selectedCommit?.id;
+        final keep = previous == null
+            ? null
+            : _commits.where((c) => c.id == previous).firstOrNull;
+        if (keep == null) _selectCommit(_commits.first);
       }
     } catch (error) {
       if (!mounted) return;
@@ -226,7 +231,7 @@ class RepositoryViewState extends State<RepositoryView> {
         break;
       }
     }
-    widget.onBranchInfoChanged?.call(head, _branches);
+    _controller.updateBranchInfo(head, _branches);
   }
 
   Future<void> _loadStatus() async {
@@ -241,6 +246,7 @@ class RepositoryViewState extends State<RepositoryView> {
         _status = status;
         _isStatusLoading = false;
       });
+      _controller.updateChangesCount(status.length);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -251,11 +257,12 @@ class RepositoryViewState extends State<RepositoryView> {
   }
 
   void _selectWorkingChanges() {
-    setState(() {
-      _isViewingChanges = true;
-      _selectedCommit = null;
-    });
-    unawaited(_loadStatus());
+    if (_isViewingChanges) {
+      unawaited(_loadStatus());
+      return;
+    }
+    // _onControllerChanged clears the selection and reloads the status.
+    _setSection(RepoSection.changes);
   }
 
   Future<bool> _stage(StatusEntry entry) async {
@@ -340,7 +347,7 @@ class RepositoryViewState extends State<RepositoryView> {
       return true;
     }
 
-    final result = await GitActions.push(widget.path, headBranch);
+    final result = await _controller.push();
     if (!mounted) return true;
     if (!result.isSuccess) {
       _showError(result.error!);
@@ -352,7 +359,7 @@ class RepositoryViewState extends State<RepositoryView> {
   /// root) in the editor, e.g. from a diff or working-changes file list.
   void _openFileInEditor(String relativePath) {
     final absolutePath = p.join(widget.path, relativePath);
-    setState(() => _mode = RepoViewMode.code);
+    _setSection(RepoSection.files);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _codeViewKey.currentState?.openFile(absolutePath);
     });
@@ -363,8 +370,11 @@ class RepositoryViewState extends State<RepositoryView> {
   }
 
   Future<void> _selectCommit(CommitEntry commit) async {
+    if (_section == RepoSection.changes) {
+      _lastSection = RepoSection.history;
+      _controller.section = RepoSection.history;
+    }
     setState(() {
-      _isViewingChanges = false;
       _selectedCommit = commit;
       _diffFiles = [];
       _selectedFilePath = null;
@@ -398,28 +408,14 @@ class RepositoryViewState extends State<RepositoryView> {
       return Center(child: Text('Failed to load repository: $_loadError'));
     }
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        ModeRail(
-          mode: _mode,
-          onChanged: (mode) {
-            setState(() => _mode = mode);
-            if (mode != RepoViewMode.code) widget.onLanguageChanged?.call(null);
-          },
-        ),
-        if (_mode == RepoViewMode.code)
-          Expanded(
-            child: CodeView(
-              key: _codeViewKey,
-              repoPath: widget.path,
-              onLanguageChanged: widget.onLanguageChanged,
-            ),
-          )
-        else
-          Expanded(child: _buildGitView(context)),
-      ],
-    );
+    if (_section == RepoSection.files) {
+      return CodeView(
+        key: _codeViewKey,
+        repoPath: widget.path,
+        onLanguageChanged: widget.onLanguageChanged,
+      );
+    }
+    return _buildGitView(context);
   }
 
   Widget _buildGitView(BuildContext context) {
@@ -431,10 +427,13 @@ class RepositoryViewState extends State<RepositoryView> {
           branches: _branches,
           width: _sidebarWidth,
           onChanged: _loadRepository,
-          watchIntervalMinutes: _watchIntervalMinutes,
-          onWatchIntervalChanged: _setWatchInterval,
-          isUpdatingCurrentBranch: _isUpdatingCurrentBranch,
-          onUpdateCurrentBranch: _updateCurrentBranch,
+          watchIntervalMinutes: _controller.watcher.intervalMinutes,
+          onWatchIntervalChanged: _controller.watcher.setIntervalMinutes,
+          isUpdatingCurrentBranch: _controller.isPulling,
+          onUpdateCurrentBranch: () async {
+            final result = await _controller.pull();
+            if (mounted && !result.isSuccess) _showError(result.error!);
+          },
         ),
         ColumnResizeHandle(
           onDrag: _resizeSidebar,
