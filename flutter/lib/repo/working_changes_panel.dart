@@ -180,6 +180,7 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
       next = (path: _unstaged.first.path, staged: false);
     }
     if (force || next != previous) {
+      if (next != previous) _diff = null;
       _selected = next;
       _loadDiff();
     }
@@ -189,6 +190,7 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
     if (sel == _selected) return;
     setState(() {
       _selected = sel;
+      _diff = null;
       _loadDiff();
     });
   }
@@ -416,7 +418,6 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
       status: staged ? entry.staged! : entry.unstaged!,
       selected: sel == _selected,
       onTap: () => _select(sel),
-      onDoubleTap: () => widget.onOpenFile(entry),
       onSecondaryTap: (pos) => _showRowMenu(pos, entry, staged),
     );
   }
@@ -736,7 +737,6 @@ class _FileRow extends StatefulWidget {
     required this.status,
     required this.selected,
     required this.onTap,
-    required this.onDoubleTap,
     required this.onSecondaryTap,
   });
 
@@ -744,7 +744,6 @@ class _FileRow extends StatefulWidget {
   final FileChangeStatus status;
   final bool selected;
   final VoidCallback onTap;
-  final VoidCallback onDoubleTap;
   final ValueChanged<Offset> onSecondaryTap;
 
   @override
@@ -770,7 +769,6 @@ class _FileRowState extends State<_FileRow> {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
-        onDoubleTap: widget.onDoubleTap,
         onSecondaryTapUp: (d) => widget.onSecondaryTap(d.globalPosition),
         child: Tooltip(
           message: path,

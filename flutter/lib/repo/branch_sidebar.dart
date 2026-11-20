@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
 import 'file_explorer.dart';
 import 'git_actions.dart';
 import 'models.dart';
@@ -336,27 +337,83 @@ class _BranchSidebarState extends State<BranchSidebar> {
     }
   }
 
+  Future<void> _showOverflowMenu(Offset position) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final interval = widget.watchIntervalMinutes;
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        position & const Size(1, 1),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        PopupMenuItem(
+          value: 'watch',
+          child: Text(
+            interval == null
+                ? 'Auto-refresh: off'
+                : 'Auto-refresh: every ${branchWatchIntervalLabel(interval)}',
+          ),
+        ),
+        const PopupMenuItem(value: 'config', child: Text('Git config…')),
+        const PopupMenuItem(
+          value: 'explorer',
+          child: Text('Open in file explorer'),
+        ),
+      ],
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'watch':
+        await _selectWatchInterval(position);
+        break;
+      case 'config':
+        await showRemotesDialog(context, widget.repoPath);
+        break;
+      case 'explorer':
+        await _openInFileExplorer();
+        break;
+    }
+  }
+
+  Widget _buildBranchRow(BranchEntry branch, {String? label}) {
+    return _BranchTile(
+      branch: branch,
+      label: label ?? branch.name,
+      onDoubleTap: () => _checkout(branch),
+      onSecondaryTapDown: (position) => _showContextMenu(position, branch),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final b = context.branchi;
     final query = _searchQuery.trim().toLowerCase();
     final local = widget.branches
-        .where((b) => !b.isRemote)
-        .where((b) => query.isEmpty || b.name.toLowerCase().contains(query))
+        .where((e) => !e.isRemote)
+        .where((e) => query.isEmpty || e.name.toLowerCase().contains(query))
         .toList();
     final remote = widget.branches
-        .where((b) => b.isRemote)
-        .where((b) => query.isEmpty || b.name.toLowerCase().contains(query))
+        .where((e) => e.isRemote)
+        .where((e) => query.isEmpty || e.name.toLowerCase().contains(query))
         .toList();
+
+    // Group remote branches by remote name ("origin/main" -> "origin").
+    final remotesByName = <String, List<BranchEntry>>{};
+    for (final branch in remote) {
+      final slash = branch.name.indexOf('/');
+      final remoteName = slash == -1 ? '' : branch.name.substring(0, slash);
+      remotesByName.putIfAbsent(remoteName, () => []).add(branch);
+    }
+
+    final watching = widget.watchIntervalMinutes != null;
 
     return Container(
       width: widget.width,
-      decoration: BoxDecoration(
-        border: Border(
-          right: BorderSide(color: Theme.of(context).dividerColor),
-        ),
-      ),
+      decoration: BoxDecoration(border: Border(right: b.hairline)),
       child: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
         children: [
           _SectionHeader(
             title: 'Branches',
@@ -365,139 +422,101 @@ class _BranchSidebarState extends State<BranchSidebar> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton(
-                  iconSize: 16,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                _SidebarAction(
+                  tooltip: _isSearching ? 'Close search' : 'Search branches',
+                  icon: _isSearching ? Icons.close : Icons.search,
+                  active: _isSearching,
+                  onPressed: _toggleSearch,
+                ),
+                _SidebarAction(
                   tooltip: widget.isUpdatingCurrentBranch
                       ? 'Pulling…'
                       : 'Update current branch',
-                  icon: widget.isUpdatingCurrentBranch
-                      ? SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                        )
-                      : Icon(
-                          Icons.refresh,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
+                  icon: Icons.refresh,
+                  busy: widget.isUpdatingCurrentBranch,
                   onPressed: widget.isUpdatingCurrentBranch
                       ? null
                       : widget.onUpdateCurrentBranch,
                 ),
-                const SizedBox(width: 4),
                 Builder(
-                  builder: (context) => IconButton(
-                    iconSize: 16,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    tooltip: widget.watchIntervalMinutes == null
-                        ? 'Auto-refresh current branch: off'
-                        : 'Auto-refresh current branch every '
-                            '${branchWatchIntervalLabel(widget.watchIntervalMinutes!)}',
-                    icon: Icon(
-                      widget.watchIntervalMinutes == null
-                          ? Icons.watch_later_outlined
-                          : Icons.watch_later,
-                      color: widget.watchIntervalMinutes == null
-                          ? Theme.of(context).colorScheme.onSurfaceVariant
-                          : Theme.of(context).colorScheme.primary,
-                    ),
+                  builder: (context) => _SidebarAction(
+                    tooltip: watching
+                        ? 'More · auto-refresh every '
+                            '${branchWatchIntervalLabel(widget.watchIntervalMinutes!)}'
+                        : 'More',
+                    icon: Icons.more_horiz,
+                    badge: watching,
                     onPressed: () {
                       final box = context.findRenderObject() as RenderBox;
-                      final position = box.localToGlobal(
-                        box.size.bottomLeft(Offset.zero),
+                      _showOverflowMenu(
+                        box.localToGlobal(box.size.bottomLeft(Offset.zero)),
                       );
-                      _selectWatchInterval(position);
                     },
                   ),
-                ),
-                const SizedBox(width: 4),
-                IconButton(
-                  iconSize: 16,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  tooltip: _isSearching ? 'Close search' : 'Search branches',
-                  icon: Icon(
-                    _isSearching ? Icons.close : Icons.search,
-                    color: _isSearching
-                        ? Theme.of(context).colorScheme.primary
-                        : Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  onPressed: _toggleSearch,
-                ),
-                const SizedBox(width: 4),
-                IconButton(
-                  iconSize: 16,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  tooltip: 'Git config',
-                  icon: Icon(
-                    Icons.settings_outlined,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  onPressed: () =>
-                      showRemotesDialog(context, widget.repoPath),
-                ),
-                const SizedBox(width: 4),
-                IconButton(
-                  iconSize: 16,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  tooltip: 'Open in file explorer',
-                  icon: Icon(
-                    Icons.folder_open,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  onPressed: _openInFileExplorer,
                 ),
               ],
             ),
           ),
           if (_isSearching)
             Padding(
-              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-              child: TextField(
-                controller: _searchController,
-                autofocus: true,
-                style: const TextStyle(fontSize: 13),
-                decoration: InputDecoration(
-                  isDense: true,
-                  hintText: 'Search branches',
-                  prefixIcon: const Icon(Icons.search, size: 16),
-                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                  border: const OutlineInputBorder(),
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Container(
+                height: 30,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: BoxDecoration(
+                  color: b.hover,
+                  borderRadius: BorderRadius.circular(6),
                 ),
-                onChanged: (value) => setState(() => _searchQuery = value),
+                child: Row(
+                  children: [
+                    Icon(Icons.search, size: 13, color: b.muted),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        autofocus: true,
+                        style: TextStyle(fontSize: 13, color: b.fg),
+                        cursorHeight: 14,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          filled: false,
+                          hintText: 'Search branches',
+                          hintStyle: TextStyle(fontSize: 13, color: b.muted),
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        onChanged: (value) =>
+                            setState(() => _searchQuery = value),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           if (_localExpanded)
-            for (final branch in local)
-              _BranchTile(
-                branch: branch,
-                onDoubleTap: () => _checkout(branch),
-                onSecondaryTapDown: (position) =>
-                    _showContextMenu(position, branch),
-              ),
+            for (final branch in local) _buildBranchRow(branch),
           if (remote.isNotEmpty) ...[
-            _SectionHeader(
-              title: 'Remote',
-              expanded: _remoteExpanded,
-              onToggle: () =>
-                  setState(() => _remoteExpanded = !_remoteExpanded),
-            ),
-            if (_remoteExpanded)
-              for (final branch in remote)
-                _BranchTile(
-                  branch: branch,
-                  onDoubleTap: () => _checkout(branch),
-                  onSecondaryTapDown: (position) =>
-                      _showContextMenu(position, branch),
-                ),
+            const SizedBox(height: 24),
+            for (final entry in remotesByName.entries) ...[
+              _SectionHeader(
+                title: entry.key.isEmpty
+                    ? 'Remote'
+                    : 'Remote · ${entry.key}',
+                expanded: _remoteExpanded,
+                onToggle: () =>
+                    setState(() => _remoteExpanded = !_remoteExpanded),
+              ),
+              if (_remoteExpanded)
+                for (final branch in entry.value)
+                  _buildBranchRow(
+                    branch,
+                    label: _shortRemoteName(branch.name),
+                  ),
+              if (entry.key != remotesByName.keys.last)
+                const SizedBox(height: 16),
+            ],
           ],
         ],
       ),
@@ -505,7 +524,7 @@ class _BranchSidebarState extends State<BranchSidebar> {
   }
 }
 
-class _SectionHeader extends StatelessWidget {
+class _SectionHeader extends StatefulWidget {
   const _SectionHeader({
     required this.title,
     required this.expanded,
@@ -519,38 +538,127 @@ class _SectionHeader extends StatelessWidget {
   final Widget? trailing;
 
   @override
+  State<_SectionHeader> createState() => _SectionHeaderState();
+}
+
+class _SectionHeaderState extends State<_SectionHeader> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
+    final b = context.branchi;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 12, 12, 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: InkWell(
-              onTap: onToggle,
-              child: Row(
-                children: [
-                  Icon(
-                    expanded
-                        ? Icons.keyboard_arrow_down
-                        : Icons.keyboard_arrow_right,
-                    size: 16,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    title.toUpperCase(),
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.5,
+      padding: const EdgeInsets.only(left: 8, bottom: 6),
+      child: SizedBox(
+        height: 22,
+        child: Row(
+          children: [
+            Expanded(
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                onEnter: (_) => setState(() => _hovered = true),
+                onExit: (_) => setState(() => _hovered = false),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: widget.onToggle,
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          widget.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: b.muted,
+                            letterSpacing: 0.44,
+                          ),
                         ),
+                      ),
+                      if (_hovered || !widget.expanded) ...[
+                        const SizedBox(width: 2),
+                        Icon(
+                          widget.expanded
+                              ? Icons.keyboard_arrow_down
+                              : Icons.keyboard_arrow_right,
+                          size: 13,
+                          color: b.muted,
+                        ),
+                      ],
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
+            if (widget.trailing != null) widget.trailing!,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A small, muted icon button for the sidebar's section toolbar.
+class _SidebarAction extends StatelessWidget {
+  const _SidebarAction({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+    this.active = false,
+    this.busy = false,
+    this.badge = false,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final bool active;
+  final bool busy;
+  final bool badge;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(4),
+        hoverColor: b.hover,
+        splashFactory: NoSplash.splashFactory,
+        child: SizedBox(
+          width: 22,
+          height: 22,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              if (busy)
+                SizedBox(
+                  width: 11,
+                  height: 11,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: b.muted,
+                  ),
+                )
+              else
+                Icon(icon, size: 14, color: active ? b.fg : b.muted),
+              if (badge)
+                Positioned(
+                  top: 3,
+                  right: 3,
+                  child: Container(
+                    width: 5,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: b.accent,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+            ],
           ),
-          if (trailing != null) trailing!,
-        ],
+        ),
       ),
     );
   }
@@ -559,36 +667,70 @@ class _SectionHeader extends StatelessWidget {
 class _BranchTile extends StatelessWidget {
   const _BranchTile({
     required this.branch,
+    required this.label,
     required this.onDoubleTap,
     required this.onSecondaryTapDown,
   });
 
   final BranchEntry branch;
+  final String label;
   final VoidCallback onDoubleTap;
   final ValueChanged<Offset> onSecondaryTapDown;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onDoubleTap: onDoubleTap,
-      onSecondaryTapDown: (details) =>
-          onSecondaryTapDown(details.globalPosition),
-      child: ListTile(
-        dense: true,
-        visualDensity: VisualDensity.compact,
-        leading: Icon(
-          branch.isRemote ? Icons.cloud_outlined : Icons.call_split,
-          size: 16,
-          color: branch.isHead
-              ? Theme.of(context).colorScheme.primary
-              : Theme.of(context).colorScheme.onSurfaceVariant,
-        ),
-        title: Text(
-          branch.name,
-          style: TextStyle(
-            fontWeight: branch.isHead ? FontWeight.bold : FontWeight.normal,
+    final b = context.branchi;
+    final current = branch.isHead;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Tooltip(
+        message: branch.name,
+        waitDuration: const Duration(milliseconds: 800),
+        child: GestureDetector(
+          onSecondaryTapDown: (details) =>
+              onSecondaryTapDown(details.globalPosition),
+          child: Material(
+            color: current ? b.hover : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            child: InkWell(
+              onDoubleTap: onDoubleTap,
+              borderRadius: BorderRadius.circular(6),
+              hoverColor: b.hover,
+              splashFactory: NoSplash.splashFactory,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: current ? b.fg : b.muted,
+                          fontWeight:
+                              current ? FontWeight.w500 : FontWeight.w400,
+                        ),
+                      ),
+                    ),
+                    if (current) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: b.accent,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
           ),
-          overflow: TextOverflow.ellipsis,
         ),
       ),
     );

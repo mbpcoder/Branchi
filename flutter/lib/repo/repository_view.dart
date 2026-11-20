@@ -15,7 +15,7 @@ import 'repo_controller.dart';
 import 'working_changes_panel.dart';
 
 const double _defaultSidebarWidth = 220;
-const double _defaultCommitListWidth = 360;
+const double _defaultCommitListWidth = 440;
 const double _minColumnWidth = 160;
 const double _maxColumnWidth = 640;
 
