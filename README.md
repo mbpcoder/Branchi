@@ -10,8 +10,16 @@ a **Rust** core with a **Flutter** UI on top.
 ## Screenshots
 
 <p>
-  <img src="docs/screenshots/screenshot-1.png" width="400" alt="Branchi branch history view" />
-  <img src="docs/screenshots/screenshot-2.png" width="400" alt="Branchi file editor view" />
+  <img src="docs/screenshots/history.png" width="400" alt="Branchi history view (dark)" />
+  <img src="docs/screenshots/history-light.png" width="400" alt="Branchi history view (light)" />
+</p>
+<p>
+  <img src="docs/screenshots/changes.png" width="400" alt="Branchi changes and commit view" />
+  <img src="docs/screenshots/editor.png" width="400" alt="Branchi file editor" />
+</p>
+<p>
+  <img src="docs/screenshots/settings.png" width="400" alt="Branchi branch watcher settings" />
+  <img src="docs/screenshots/welcome.png" width="400" alt="Branchi welcome screen" />
 </p>
 
 ## Prerequisites (Windows 11)
