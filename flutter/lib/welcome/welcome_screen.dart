@@ -9,17 +9,20 @@ import '../l10n/translations.dart';
 import '../logs/logs_panel.dart';
 import '../models/repo_tab.dart';
 import '../repo/repository_view.dart';
-import '../settings/settings_page.dart';
+import '../settings/settings_route.dart';
 import '../settings/shell_preferences.dart';
 import '../terminal/terminal_panel.dart';
 import '../terminal/terminal_session.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_top_bar.dart';
 import '../widgets/bottom_toolbar.dart';
 import '../widgets/tab_bar_row.dart';
 import 'welcome_form.dart';
 
-/// The app's main screen: the tab bar, the active tab's content (start
-/// page or an opened repository), and the terminal panel.
+/// The app's main window: the top bar (with repo switcher, section tabs and
+/// remote actions), a slim tab strip while several tabs are open, the
+/// active tab's content (start page or an opened repository), the terminal
+/// and logs panels, and the footer.
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
 
@@ -80,11 +83,15 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         for (final session in tab.terminalSessions) {
           session.dispose();
         }
+        tab.dispose();
       }
       return;
     }
 
     setState(() {
+      for (final tab in _tabs) {
+        tab.dispose();
+      }
       _tabs
         ..clear()
         ..addAll(restoredTabs);
@@ -177,6 +184,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       for (final session in tab.terminalSessions) {
         session.dispose();
       }
+      tab.dispose();
     }
     super.dispose();
   }
@@ -225,6 +233,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     for (final session in removed.terminalSessions) {
       session.dispose();
     }
+    removed.dispose();
     _saveState();
   }
 
@@ -240,9 +249,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 
   void _openSettings() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (context) => const SettingsPage()),
-    );
+    openSettings(context);
+  }
+
+  void _selectTab(int index) {
+    if (index == _activeTabIndex) return;
+    setState(() => _activeTabIndex = index);
+    _saveState();
   }
 
   /// Attaches [path] to the currently active tab, e.g. after a repository
@@ -261,119 +274,76 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     return ValueListenableBuilder<String>(
       valueListenable: AppLocale.languageCode,
       builder: (context, _, __) {
-        return ValueListenableBuilder<ThemeMode>(
-          valueListenable: AppTheme.themeMode,
-          builder: (context, themeMode, ___) {
-            final isDark = themeMode == ThemeMode.dark ||
-                (themeMode == ThemeMode.system &&
-                    MediaQuery.platformBrightnessOf(context) ==
-                        Brightness.dark);
-            return Scaffold(
-              appBar: AppBar(
-                title: Text(translate('app_title')),
-                bottom: PreferredSize(
-                  preferredSize: const Size.fromHeight(40),
-                  child: TabBarRow(
-                    tabs: _tabs,
-                    activeIndex: _activeTabIndex,
-                    onSelect: (index) {
-                      setState(() => _activeTabIndex = index);
-                      _saveState();
-                    },
-                    onClose: _closeTab,
-                    onAddTab: _addTab,
-                  ),
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final tab = _tabs[_activeTabIndex];
+        return Scaffold(
+          body: Column(
+            children: [
+              AppTopBar(
+                tabs: _tabs,
+                activeIndex: _activeTabIndex,
+                onSelectTab: _selectTab,
+                onCloseTab: _closeTab,
+                onAddTab: _addTab,
+                controller: tab.controller,
+                onOpenSettings: _openSettings,
+                isDark: isDark,
+                onToggleTheme: AppTheme.toggle,
+                isPinned: _isPinned,
+                onTogglePin: _togglePin,
+              ),
+              if (_tabs.length > 1)
+                TabBarRow(
+                  tabs: _tabs,
+                  activeIndex: _activeTabIndex,
+                  onSelect: _selectTab,
+                  onClose: _closeTab,
+                  onAddTab: _addTab,
                 ),
-                actions: [
-                  IconButton(
-                    tooltip: translate('settings'),
-                    icon: const Icon(Icons.settings),
-                    onPressed: _openSettings,
-                  ),
-                  IconButton(
-                    tooltip: isDark
-                        ? translate('switch_to_light_mode')
-                        : translate('switch_to_dark_mode'),
-                    icon: Icon(isDark ? Icons.light_mode : Icons.dark_mode),
-                    onPressed: AppTheme.toggle,
-                  ),
-                  IconButton(
-                    tooltip: _isPinned
-                        ? translate('unpin_window')
-                        : translate('pin_window'),
-                    icon: Icon(
-                      _isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-                    ),
-                    onPressed: _togglePin,
-                  ),
-                ],
-              ),
-              body: Column(
-                children: [
-                  Expanded(
-                    child: _tabs[_activeTabIndex].path != null
-                        ? RepositoryView(
-                            key: _tabs[_activeTabIndex].repositoryViewKey,
-                            path: _tabs[_activeTabIndex].path!,
-                            onLanguageChanged: (label) => setState(
-                              () => _tabs[_activeTabIndex].fileTypeLabel =
-                                  label,
-                            ),
-                            onBranchInfoChanged: (head, branches) => setState(
-                              () {
-                                _tabs[_activeTabIndex].currentBranch = head;
-                                _tabs[_activeTabIndex].branches = branches;
-                              },
-                            ),
-                          )
-                        : WelcomeForm(
-                            key: ValueKey(_tabs[_activeTabIndex].id),
-                            onRepositoryOpened: _setActiveTabRepository,
-                          ),
-                  ),
-                  if (_tabs[_activeTabIndex].isTerminalOpen)
-                    TerminalPanel(
-                      key: ValueKey(_tabs[_activeTabIndex].id),
-                      sessions: _tabs[_activeTabIndex].terminalSessions,
-                      activeIndex: _tabs[_activeTabIndex].activeTerminalIndex,
-                      onSelect: (index) {
-                        setState(
-                          () => _tabs[_activeTabIndex].activeTerminalIndex =
-                              index,
-                        );
-                        _saveState();
-                      },
-                      onClose: _closeTerminalTab,
-                      onAddTab: _addTerminalTab,
-                      height: _tabs[_activeTabIndex].terminalHeight,
-                      onHeightChanged: (value) => setState(
-                        () => _tabs[_activeTabIndex].terminalHeight = value,
+              Expanded(
+                child: tab.path != null && tab.controller != null
+                    ? RepositoryView(
+                        key: tab.repositoryViewKey,
+                        path: tab.path!,
+                        controller: tab.controller!,
+                        onLanguageChanged: (label) =>
+                            setState(() => tab.fileTypeLabel = label),
+                      )
+                    : WelcomeForm(
+                        key: ValueKey(tab.id),
+                        onRepositoryOpened: _setActiveTabRepository,
                       ),
-                    ),
-                  if (_tabs[_activeTabIndex].isLogsOpen)
-                    LogsPanel(
-                      height: _tabs[_activeTabIndex].logsHeight,
-                      onHeightChanged: (value) => setState(
-                        () => _tabs[_activeTabIndex].logsHeight = value,
-                      ),
-                    ),
-                  BottomToolbar(
-                    isTerminalOpen: _tabs[_activeTabIndex].isTerminalOpen,
-                    onToggleTerminal: _toggleTerminal,
-                    isLogsOpen: _tabs[_activeTabIndex].isLogsOpen,
-                    onToggleLogs: _toggleLogs,
-                    fileTypeLabel: _tabs[_activeTabIndex].fileTypeLabel,
-                    currentBranch: _tabs[_activeTabIndex].currentBranch,
-                    branches: _tabs[_activeTabIndex].branches,
-                    onSelectBranch: (branch) => _tabs[_activeTabIndex]
-                        .repositoryViewKey
-                        .currentState
-                        ?.checkoutBranch(branch.name),
-                  ),
-                ],
               ),
-            );
-          },
+              if (tab.isTerminalOpen)
+                TerminalPanel(
+                  key: ValueKey(tab.id),
+                  sessions: tab.terminalSessions,
+                  activeIndex: tab.activeTerminalIndex,
+                  onSelect: (index) {
+                    setState(() => tab.activeTerminalIndex = index);
+                    _saveState();
+                  },
+                  onClose: _closeTerminalTab,
+                  onAddTab: _addTerminalTab,
+                  height: tab.terminalHeight,
+                  onHeightChanged: (value) =>
+                      setState(() => tab.terminalHeight = value),
+                ),
+              if (tab.isLogsOpen)
+                LogsPanel(
+                  height: tab.logsHeight,
+                  onHeightChanged: (value) =>
+                      setState(() => tab.logsHeight = value),
+                ),
+              BottomToolbar(
+                isTerminalOpen: tab.isTerminalOpen,
+                onToggleTerminal: _toggleTerminal,
+                isLogsOpen: tab.isLogsOpen,
+                onToggleLogs: _toggleLogs,
+                fileTypeLabel: tab.fileTypeLabel,
+              ),
+            ],
+          ),
         );
       },
     );

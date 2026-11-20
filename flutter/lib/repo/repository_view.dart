@@ -209,10 +209,9 @@ class RepositoryViewState extends State<RepositoryView> {
       unawaited(_loadStatus());
       if (_commits.isNotEmpty && !_isViewingChanges) {
         final previous = _selectedCommit?.id;
-        final keep = previous == null
-            ? null
-            : _commits.where((c) => c.id == previous).firstOrNull;
-        if (keep == null) _selectCommit(_commits.first);
+        final stillListed =
+            previous != null && _commits.any((c) => c.id == previous);
+        if (!stillListed) _selectCommit(_commits.first);
       }
     } catch (error) {
       if (!mounted) return;
@@ -324,7 +323,7 @@ class RepositoryViewState extends State<RepositoryView> {
     final result = await GitActions.commit(widget.path, message);
     if (!mounted) return false;
     if (result.isSuccess) {
-      await Future.wait([_loadStatus(), _loadRepository()]);
+      await Future.wait([_loadStatus(), _loadRepository(showSpinner: false)]);
     } else {
       _showError(result.error!);
     }

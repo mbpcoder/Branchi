@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../l10n/app_locale.dart';
 import '../l10n/translations.dart';
 import '../repo/git_actions.dart';
+import 'settings_route.dart';
 import 'shell_preferences.dart';
 
 /// Settings page opened from the gear icon in the top toolbar.
@@ -10,7 +11,13 @@ import 'shell_preferences.dart';
 /// Exposes the language picker, the list of shells available to the
 /// terminal panel, and the global git identity (user.name/user.email).
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
+  const SettingsPage({super.key, this.initialSection});
+
+  /// Id of the section to reveal when the page opens, e.g.
+  /// [kSettingsSectionBranchWatcher] (`'branch_watcher'`). `null` opens the
+  /// page at the top. Open the page via [openSettings] rather than pushing
+  /// it directly.
+  final String? initialSection;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
