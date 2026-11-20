@@ -9,6 +9,10 @@ import 'package:re_highlight/languages/all.dart';
 import 'package:re_highlight/styles/github-dark.dart';
 import 'package:re_highlight/styles/github.dart';
 
+import '../l10n/app_locale.dart';
+import '../theme/app_theme.dart';
+import 'file_tree.dart' show fileTreeRefreshSignal;
+
 /// One open file in the editor's tab strip.
 class _OpenFile {
   _OpenFile(this.path, String initialText)
@@ -101,6 +105,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
         file.savedText = file.controller.text;
         file.isDirty = false;
       });
+      fileTreeRefreshSignal.value++;
     } catch (error) {
       setState(() => _error = 'Failed to save ${p.basename(file.path)}: $error');
     }
@@ -234,12 +239,39 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
     });
   }
 
+  /// The active file's path relative to its enclosing git repository (or
+  /// just its basename), split into breadcrumb segments.
+  static String _breadcrumbFor(String path) {
+    var dir = p.dirname(path);
+    while (true) {
+      try {
+        if (Directory(p.join(dir, '.git')).existsSync() ||
+            File(p.join(dir, '.git')).existsSync()) {
+          return p.split(p.relative(path, from: dir)).join(' / ');
+        }
+      } catch (_) {
+        break;
+      }
+      final parent = p.dirname(dir);
+      if (parent == dir) break;
+      dir = parent;
+    }
+    return p.basename(path);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final c = context.branchi;
     if (_open.isEmpty) {
       _notifyLanguage(null);
-      return const Center(
-        child: Text('Select a file from the project tree to start editing.'),
+      return ColoredBox(
+        color: c.bg,
+        child: Center(
+          child: Text(
+            translate('editor_select_file'),
+            style: TextStyle(color: c.muted),
+          ),
+        ),
       );
     }
 
@@ -247,83 +279,196 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final languageName = _languageNameFor(active.path);
     final mode = languageName == null ? null : builtinAllLanguages[languageName];
-    _notifyLanguage(_fileTypeLabelFor(active.path));
+    final fileTypeLabel = _fileTypeLabelFor(active.path);
+    _notifyLanguage(fileTypeLabel);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: _TabStrip(
-                files: _open,
-                activeIndex: _activeIndex,
-                onSelect: (i) => setState(() => _activeIndex = i),
-                onClose: _closeTab,
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.save, size: 18),
-              tooltip: 'Save (Ctrl+S)',
-              onPressed: active.isDirty ? () => _save(active) : null,
-            ),
-          ],
-        ),
-        if (_error != null)
-          MaterialBanner(
-            content: Text(_error!),
-            actions: [
-              TextButton(
-                onPressed: () => setState(() => _error = null),
-                child: const Text('Dismiss'),
-              ),
-            ],
-          ),
-        const Divider(height: 1),
-        Expanded(
-          child: CallbackShortcuts(
-            bindings: {
-              const SingleActivator(LogicalKeyboardKey.keyS, control: true):
-                  () => _save(active),
-              const SingleActivator(LogicalKeyboardKey.keyS, meta: true):
-                  () => _save(active),
-            },
-            child: Focus(
-              autofocus: true,
-              child: CodeEditor(
-                key: ValueKey(active.path),
-                controller: active.controller,
-                wordWrap: false,
-                style: CodeEditorStyle(
-                  codeTheme: mode == null
-                      ? null
-                      : CodeHighlightTheme(
-                          languages: {
-                            languageName!: CodeHighlightThemeMode(mode: mode),
-                          },
-                          theme: isDark ? githubDarkTheme : githubTheme,
-                        ),
+    final baseCodeTheme = isDark ? githubDarkTheme : githubTheme;
+    final codeTheme = <String, TextStyle>{
+      ...baseCodeTheme,
+      'root': TextStyle(color: c.fg),
+    };
+    const codeFontSize = 13.0;
+    final gutterStyle = c.mono(fontSize: codeFontSize, color: c.muted);
+
+    return ColoredBox(
+      color: c.bg,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            height: 40,
+            decoration: BoxDecoration(border: Border(bottom: c.hairline)),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: _TabStrip(
+                    files: _open,
+                    activeIndex: _activeIndex,
+                    onSelect: (i) => setState(() => _activeIndex = i),
+                    onClose: _closeTab,
+                  ),
                 ),
-                indicatorBuilder: (context, editingController, chunkController, notifier) {
-                  return Row(
-                    children: [
-                      DefaultCodeLineNumber(
-                        controller: editingController,
-                        notifier: notifier,
-                      ),
-                      DefaultCodeChunkIndicator(
-                        width: 20,
-                        controller: chunkController,
-                        notifier: notifier,
-                      ),
-                    ],
-                  );
-                },
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      _breadcrumbFor(active.path),
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: c.muted),
+                    ),
+                  ),
+                ),
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsetsDirectional.only(end: 8),
+                    child: IconButton(
+                      icon: const Icon(Icons.save_outlined, size: 16),
+                      color: c.muted,
+                      visualDensity: VisualDensity.compact,
+                      tooltip: 'Save (Ctrl+S)',
+                      onPressed: active.isDirty ? () => _save(active) : null,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_error != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              decoration: BoxDecoration(
+                color: c.delBg,
+                border: Border(bottom: c.hairline),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _error!,
+                      style: TextStyle(fontSize: 12, color: c.del),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() => _error = null),
+                    child: const Text('Dismiss'),
+                  ),
+                ],
+              ),
+            ),
+          Expanded(
+            child: CallbackShortcuts(
+              bindings: {
+                const SingleActivator(LogicalKeyboardKey.keyS, control: true):
+                    () => _save(active),
+                const SingleActivator(LogicalKeyboardKey.keyS, meta: true):
+                    () => _save(active),
+              },
+              child: Focus(
+                autofocus: true,
+                child: CodeEditor(
+                  key: ValueKey(active.path),
+                  controller: active.controller,
+                  wordWrap: false,
+                  padding: const EdgeInsets.fromLTRB(0, 16, 16, 16),
+                  style: CodeEditorStyle(
+                    fontSize: codeFontSize,
+                    fontFamily: kMonoFontFamily,
+                    fontFamilyFallback: kMonoFontFallback,
+                    fontHeight: 22 / codeFontSize,
+                    textColor: c.fg,
+                    hintTextColor: c.muted,
+                    backgroundColor: c.bg,
+                    selectionColor: c.accent.withValues(alpha: 0.25),
+                    highlightColor: c.mod.withValues(alpha: 0.25),
+                    cursorColor: c.accent,
+                    cursorLineColor: c.hover,
+                    chunkIndicatorColor: c.muted,
+                    codeTheme: mode == null
+                        ? null
+                        : CodeHighlightTheme(
+                            languages: {
+                              languageName!: CodeHighlightThemeMode(mode: mode),
+                            },
+                            theme: codeTheme,
+                          ),
+                  ),
+                  indicatorBuilder:
+                      (context, editingController, chunkController, notifier) {
+                    return Row(
+                      children: [
+                        SizedBox(
+                          width: 52,
+                          child: Align(
+                            alignment: AlignmentDirectional.centerEnd,
+                            child: DefaultCodeLineNumber(
+                              controller: editingController,
+                              notifier: notifier,
+                              textStyle: gutterStyle,
+                              focusedTextStyle:
+                                  gutterStyle.copyWith(color: c.fg),
+                            ),
+                          ),
+                        ),
+                        DefaultCodeChunkIndicator(
+                          width: 20,
+                          controller: chunkController,
+                          notifier: notifier,
+                        ),
+                      ],
+                    );
+                  },
+                ),
               ),
             ),
           ),
-        ),
-      ],
+          _EditorFooter(file: active, languageLabel: fileTypeLabel),
+        ],
+      ),
+    );
+  }
+}
+
+/// 28px status footer: saved/modified on the left, cursor position,
+/// encoding and language on the right.
+class _EditorFooter extends StatelessWidget {
+  const _EditorFooter({required this.file, required this.languageLabel});
+
+  final _OpenFile file;
+  final String? languageLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.branchi;
+    final style = TextStyle(fontSize: 12, color: c.muted);
+    return Container(
+      height: 28,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(border: Border(top: c.hairline)),
+      child: ListenableBuilder(
+        listenable: file.controller,
+        builder: (context, _) {
+          final selection = file.controller.selection;
+          final position = translate('editor_cursor_position')
+              .replaceAll('{line}', '${selection.extentIndex + 1}')
+              .replaceAll('{col}', '${selection.extentOffset + 1}');
+          final parts = [
+            position,
+            'UTF-8',
+            ?languageLabel,
+          ];
+          return Row(
+            children: [
+              Text(
+                translate(file.isDirty ? 'editor_modified' : 'editor_saved'),
+                style: style,
+              ),
+              const Spacer(),
+              Text(parts.join('  ·  '), style: style),
+            ],
+          );
+        },
+      ),
     );
   }
 }
@@ -343,29 +488,24 @@ class _TabStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SizedBox(
-      height: 36,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: files.length,
-        itemBuilder: (context, index) {
-          final file = files[index];
-          final isActive = index == activeIndex;
-          return InkWell(
+    final c = context.branchi;
+    return ListView.builder(
+      scrollDirection: Axis.horizontal,
+      itemCount: files.length,
+      itemBuilder: (context, index) {
+        final file = files[index];
+        final isActive = index == activeIndex;
+        return MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
             onTap: () => onSelect(index),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsetsDirectional.only(start: 16, end: 10),
               decoration: BoxDecoration(
-                color: isActive
-                    ? theme.colorScheme.surfaceContainerHighest
-                    : null,
                 border: Border(
-                  right: BorderSide(color: theme.dividerColor),
                   bottom: BorderSide(
-                    color: isActive
-                        ? theme.colorScheme.primary
-                        : Colors.transparent,
+                    color: isActive ? c.accent : Colors.transparent,
                     width: 2,
                   ),
                 ),
@@ -373,22 +513,41 @@ class _TabStrip extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(p.basename(file.path), style: theme.textTheme.bodySmall),
-                  if (file.isDirty) ...[
-                    const SizedBox(width: 4),
-                    const Icon(Icons.circle, size: 8),
-                  ],
-                  const SizedBox(width: 6),
+                  Text(
+                    p.basename(file.path),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isActive ? c.fg : c.muted,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 6,
+                    height: 6,
+                    child: file.isDirty
+                        ? DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: c.mod,
+                              shape: BoxShape.circle,
+                            ),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 4),
                   InkWell(
+                    borderRadius: BorderRadius.circular(4),
                     onTap: () => onClose(index),
-                    child: const Icon(Icons.close, size: 14),
+                    child: Padding(
+                      padding: const EdgeInsets.all(2),
+                      child: Icon(Icons.close, size: 12, color: c.muted),
+                    ),
                   ),
                 ],
               ),
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 }
