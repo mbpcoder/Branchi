@@ -4,7 +4,7 @@ import '../repo/column_resize_handle.dart';
 import 'code_editor_panel.dart';
 import 'file_tree.dart';
 
-const double _defaultTreeWidth = 240;
+const double _defaultTreeWidth = 260;
 const double _minTreeWidth = 160;
 const double _maxTreeWidth = 480;
 

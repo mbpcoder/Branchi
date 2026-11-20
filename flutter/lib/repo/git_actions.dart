@@ -211,6 +211,47 @@ class GitActions {
         : GitActionResult.failure(error);
   }
 
+  /// Fetches every configured remote (equivalent to `git fetch --all`),
+  /// updating remote-tracking branches without touching local ones.
+  static Future<GitActionResult> fetch(String path) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
+
+    List<RemoteEntry> remoteList;
+    try {
+      remoteList = await remotes(path);
+    } catch (e) {
+      final error = e.toString();
+      ActionLog.instance.record('fetch', success: false, detail: error);
+      return GitActionResult.failure(error);
+    }
+    if (remoteList.isEmpty) {
+      const error = 'No remotes configured.';
+      ActionLog.instance.record('fetch', success: false, detail: error);
+      return const GitActionResult.failure(error);
+    }
+
+    final errors = <String>[];
+    for (final remote in remoteList) {
+      // The core fetches the remote named by the first path segment of a
+      // remote-tracking branch name, so `<remote>/HEAD` fetches all of it.
+      final remoteBranch = '${remote.name}/HEAD';
+      final error = await Isolate.run(
+        () => ffi.updateBranch(path, remoteBranch, isRemote: true),
+      );
+      if (error != null) errors.add(error);
+    }
+    final error = errors.isEmpty ? null : errors.join('\n');
+    ActionLog.instance.record(
+      remoteList.length == 1 ? 'fetch ${remoteList.first.name}' : 'fetch all',
+      success: error == null,
+      detail: error,
+    );
+    return error == null
+        ? const GitActionResult.success()
+        : GitActionResult.failure(error);
+  }
+
   /// Working-tree/index status of every changed file.
   static Future<List<StatusEntry>> status(String path) async {
     final ffi = GitFfi.instanceOrNull;

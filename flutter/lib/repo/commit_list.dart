@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
 import 'models.dart';
 
 /// Middle pane: the commit log for the open repo, newest first.
@@ -41,34 +42,22 @@ class _CommitListState extends State<CommitList> {
 
   @override
   Widget build(BuildContext context) {
+    final b = context.branchi;
     final commits = _filteredCommits;
+    final now = DateTime.now();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-          child: TextField(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: _SearchField(
             controller: _searchController,
+            hasQuery: _query.isNotEmpty,
             onChanged: (value) => setState(() => _query = value),
-            decoration: InputDecoration(
-              hintText: 'Search commit message or hash',
-              prefixIcon: const Icon(Icons.search, size: 20),
-              isDense: true,
-              suffixIcon: _query.isEmpty
-                  ? null
-                  : IconButton(
-                      icon: const Icon(Icons.clear, size: 18),
-                      onPressed: () {
-                        _searchController.clear();
-                        setState(() => _query = '');
-                      },
-                    ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            ),
+            onClear: () {
+              _searchController.clear();
+              setState(() => _query = '');
+            },
           ),
         ),
         Expanded(
@@ -78,16 +67,17 @@ class _CommitListState extends State<CommitList> {
                     widget.commits.isEmpty
                         ? 'No commits yet'
                         : 'No commits match your search',
+                    style: TextStyle(color: b.muted),
                   ),
                 )
               : ListView.builder(
                   itemCount: commits.length,
                   itemBuilder: (context, index) {
                     final commit = commits[index];
-                    final selected = commit.id == widget.selectedId;
                     return _CommitTile(
                       commit: commit,
-                      selected: selected,
+                      now: now,
+                      selected: commit.id == widget.selectedId,
                       onTap: () => widget.onSelect(commit),
                     );
                   },
@@ -98,35 +88,121 @@ class _CommitListState extends State<CommitList> {
   }
 }
 
+class _SearchField extends StatelessWidget {
+  const _SearchField({
+    required this.controller,
+    required this.hasQuery,
+    required this.onChanged,
+    required this.onClear,
+  });
+
+  final TextEditingController controller;
+  final bool hasQuery;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    return Container(
+      height: 34,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: b.hover,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.search, size: 14, color: b.muted),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              onChanged: onChanged,
+              style: TextStyle(fontSize: 13, color: b.fg),
+              cursorColor: b.fg,
+              cursorHeight: 14,
+              decoration: InputDecoration(
+                hintText: 'Search commits',
+                hintStyle: TextStyle(fontSize: 13, color: b.muted),
+                isDense: true,
+                filled: false,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+          if (hasQuery)
+            InkWell(
+              onTap: onClear,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.all(2),
+                child: Icon(Icons.close, size: 14, color: b.muted),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CommitTile extends StatelessWidget {
   const _CommitTile({
     required this.commit,
+    required this.now,
     required this.selected,
     required this.onTap,
   });
 
   final CommitEntry commit;
+  final DateTime now;
   final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final b = context.branchi;
+    final dotColor = selected ? b.accent : b.muted;
     return Material(
-      color: selected ? scheme.primaryContainer : Colors.transparent,
+      color: selected ? b.hover : Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        hoverColor: b.hover,
+        splashFactory: NoSplash.splashFactory,
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border(
+              left: BorderSide(
+                width: 2,
+                color: selected ? b.accent : Colors.transparent,
+              ),
+            ),
+          ),
+          padding: const EdgeInsets.fromLTRB(14, 12, 16, 12),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                commit.isMergeCommit ? Icons.merge_type : Icons.circle,
-                size: commit.isMergeCommit ? 16 : 10,
-                color: scheme.primary,
+              SizedBox(
+                width: 10,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 5),
+                  child: Center(
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: commit.isMergeCommit ? null : dotColor,
+                        border: Border.all(color: dotColor, width: 1.5),
+                      ),
+                    ),
+                  ),
+                ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -135,18 +211,31 @@ class _CommitTile extends StatelessWidget {
                       commit.summary,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w500,
+                        color: b.fg,
+                      ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${commit.author} · ${commit.shortId} · ${_formatDate(commit.time)}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
+                    const SizedBox(height: 4),
+                    Tooltip(
+                      message: formatCommitDate(commit.time),
+                      waitDuration: const Duration(milliseconds: 600),
+                      child: Text(
+                        '${commit.author} · ${formatRelativeTime(commit.time, now)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, color: b.muted),
+                      ),
                     ),
                   ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  commit.shortId,
+                  style: b.mono(fontSize: 11, color: b.muted),
                 ),
               ),
             ],
@@ -155,11 +244,30 @@ class _CommitTile extends StatelessWidget {
       ),
     );
   }
+}
 
-  static String _formatDate(DateTime time) {
-    final local = time.toLocal();
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${local.year}-${two(local.month)}-${two(local.day)} '
-        '${two(local.hour)}:${two(local.minute)}';
-  }
+const List<String> _monthNames = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/// Compact relative time for commit rows: "just now", "5m ago", "3h ago",
+/// "2d ago", then "Sep 25" (or "Sep 25, 2023" for other years).
+String formatRelativeTime(DateTime time, DateTime now) {
+  final local = time.toLocal();
+  final diff = now.difference(local);
+  if (diff.isNegative || diff.inMinutes < 1) return 'just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+  if (diff.inHours < 24) return '${diff.inHours}h ago';
+  if (diff.inDays < 7) return '${diff.inDays}d ago';
+  final date = '${_monthNames[local.month - 1]} ${local.day}';
+  return local.year == now.year ? date : '$date, ${local.year}';
+}
+
+/// Absolute commit date, e.g. "Sep 26, 2025, 12:26".
+String formatCommitDate(DateTime time) {
+  final local = time.toLocal();
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${_monthNames[local.month - 1]} ${local.day}, ${local.year}, '
+      '${two(local.hour)}:${two(local.minute)}';
 }
