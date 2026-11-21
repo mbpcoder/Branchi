@@ -28,13 +28,22 @@ class _OpenFile {
         isDirty = nowDirty;
         onDirtyChanged?.call();
       }
+      // Auto-save once typing pauses; any further edit restarts the wait.
+      autoSaveTimer?.cancel();
+      autoSaveTimer =
+          isDirty ? Timer(autoSaveDelay, () => onAutoSave?.call()) : null;
     });
   }
+
+  /// How long after the last edit a dirty file is saved automatically.
+  static const autoSaveDelay = Duration(seconds: 1);
 
   final String path;
   final CodeLineEditingController controller;
   bool isDirty = false;
   VoidCallback? onDirtyChanged;
+  VoidCallback? onAutoSave;
+  Timer? autoSaveTimer;
   late String savedText;
 }
 
@@ -71,6 +80,15 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
   @override
   void dispose() {
     for (final file in _open) {
+      file.autoSaveTimer?.cancel();
+      // Flush edits still waiting on the auto-save delay.
+      if (file.isDirty) {
+        try {
+          File(file.path).writeAsStringSync(file.controller.text);
+        } catch (_) {
+          // Nowhere left to report the error once the panel is gone.
+        }
+      }
       file.controller.dispose();
     }
     widget.onLanguageChanged?.call(null);
@@ -88,6 +106,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
       final text = await File(path).readAsString();
       final file = _OpenFile(path, text);
       file.onDirtyChanged = () => setState(() {});
+      file.onAutoSave = () => unawaited(_save(file));
       setState(() {
         _open.add(file);
         _activeIndex = _open.length - 1;
@@ -98,47 +117,41 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
     }
   }
 
-  Future<void> _save(_OpenFile file) async {
+  /// Writes [file] to disk. Returns false (and shows the error) on failure.
+  Future<bool> _save(_OpenFile file) async {
+    file.autoSaveTimer?.cancel();
+    // Edits made while the write is in flight must keep the file dirty, so
+    // compare against the text actually written rather than the live text.
+    final text = file.controller.text;
     try {
-      await File(file.path).writeAsString(file.controller.text);
+      await File(file.path).writeAsString(text);
+      if (!mounted || !_open.contains(file)) return true;
       setState(() {
-        file.savedText = file.controller.text;
-        file.isDirty = false;
+        file.savedText = text;
+        file.isDirty = file.controller.text != text;
       });
       fileTreeRefreshSignal.value++;
+      return true;
     } catch (error) {
-      setState(() => _error = 'Failed to save ${p.basename(file.path)}: $error');
+      if (mounted) {
+        setState(
+          () => _error = 'Failed to save ${p.basename(file.path)}: $error',
+        );
+      }
+      return false;
     }
   }
 
   Future<void> _closeTab(int index) async {
     final file = _open[index];
-    if (file.isDirty) {
-      final action = await showDialog<String>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Unsaved changes'),
-          content: Text('"${p.basename(file.path)}" has unsaved changes.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop('cancel'),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop('discard'),
-              child: const Text('Discard'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop('save'),
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      );
-      if (action == 'cancel' || action == null) return;
-      if (action == 'save') await _save(file);
-    }
+    // Auto-save is always on: save pending edits instead of prompting, and
+    // keep the tab open if that fails so nothing is lost.
+    if (file.isDirty && !await _save(file)) return;
+    if (!mounted) return;
+    index = _open.indexOf(file);
+    if (index == -1) return;
 
+    file.autoSaveTimer?.cancel();
     file.controller.dispose();
     setState(() {
       _open.removeAt(index);
@@ -369,6 +382,18 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
                 child: CodeEditor(
                   key: ValueKey(active.path),
                   controller: active.controller,
+                  // re_editor binds Ctrl/Cmd+S to its own (no-op) save intent
+                  // and swallows the key, so the CallbackShortcuts above
+                  // never see it while the editor is focused.
+                  shortcutOverrideActions: {
+                    CodeShortcutSaveIntent:
+                        CallbackAction<CodeShortcutSaveIntent>(
+                      onInvoke: (_) {
+                        unawaited(_save(active));
+                        return null;
+                      },
+                    ),
+                  },
                   wordWrap: false,
                   padding: const EdgeInsets.fromLTRB(0, 16, 16, 16),
                   style: CodeEditorStyle(
