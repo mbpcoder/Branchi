@@ -1,7 +1,7 @@
 # Branchi — a free, open-source git client for Windows and Linux
 
 <p align="center">
-  <img src="docs/branchi-demo.gif" width="820" alt="Branchi git client: update all repositories in a folder at once, then repository and author activity reports" />
+  <img src="docs/branchi-demo.gif" width="820" alt="Branchi git client tour: update all repositories in a folder, activity reports, history, changes, editor and settings" />
 </p>
 
 **Branchi** is a free and open-source (MIT) desktop git client for Windows and Linux with a **Rust** core
