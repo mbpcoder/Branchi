@@ -268,6 +268,42 @@ impl GitRepo {
         Self::diff_to_file_entries(&diff)
     }
 
+    /// Unified-diff patch (git's standard format, including file and hunk
+    /// headers) of the uncommitted changes to `path`. With `staged`, this
+    /// is the index against HEAD (`git diff --cached -- <path>`); otherwise
+    /// the working tree against the index (`git diff -- <path>`), with
+    /// untracked files shown as fully added.
+    pub fn working_file_diff(&self, path: &str, staged: bool) -> Result<String> {
+        let mut opts = DiffOptions::new();
+        opts.pathspec(path).disable_pathspec_match(true);
+
+        let diff = if staged {
+            // An unborn HEAD (no commits yet) diffs against the empty tree.
+            let head_tree = match self.repo.head() {
+                Ok(head) => Some(head.peel_to_tree()?),
+                Err(_) => None,
+            };
+            self.repo
+                .diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?
+        } else {
+            opts.include_untracked(true)
+                .recurse_untracked_dirs(true)
+                .show_untracked_content(true);
+            self.repo.diff_index_to_workdir(None, Some(&mut opts))?
+        };
+
+        let mut patch = String::new();
+        diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+            if matches!(line.origin(), '+' | '-' | ' ') {
+                patch.push(line.origin());
+            }
+            patch.push_str(&String::from_utf8_lossy(line.content()));
+            true
+        })
+        .with_context(|| format!("failed to diff file: {path}"))?;
+        Ok(patch)
+    }
+
     fn diff_to_file_entries(diff: &Diff) -> Result<Vec<DiffFileEntry>> {
         use std::cell::RefCell;
         use std::collections::HashMap;
@@ -336,7 +372,9 @@ impl GitRepo {
                         _ => "",
                     };
                     entry.patch.push_str(prefix);
-                    entry.patch.push_str(&String::from_utf8_lossy(line.content()));
+                    entry
+                        .patch
+                        .push_str(&String::from_utf8_lossy(line.content()));
                 }
                 true
             }),
@@ -661,8 +699,7 @@ impl GitRepo {
             #[cfg(not(windows))]
             {
                 if let Ok(config) = self.repo.config() {
-                    if let Ok(cred) =
-                        git2::Cred::credential_helper(&config, url, username_from_url)
+                    if let Ok(cred) = git2::Cred::credential_helper(&config, url, username_from_url)
                     {
                         return Ok(cred);
                     }
@@ -1125,7 +1162,9 @@ mod tests {
 
         write_file(dir.path(), "a.txt", "one\ntwo\n");
         repo.stage("a.txt").unwrap();
-        let first = repo.commit("init", "Test User", "test@example.com").unwrap();
+        let first = repo
+            .commit("init", "Test User", "test@example.com")
+            .unwrap();
 
         let diff = repo.commit_diff(&first).unwrap();
         assert_eq!(diff.len(), 1);
@@ -1154,7 +1193,9 @@ mod tests {
 
         write_file(dir.path(), "a.txt", "one");
         repo.stage("a.txt").unwrap();
-        let first = repo.commit("init", "Test User", "test@example.com").unwrap();
+        let first = repo
+            .commit("init", "Test User", "test@example.com")
+            .unwrap();
 
         write_file(dir.path(), "a.txt", "two");
         repo.stage("a.txt").unwrap();
@@ -1174,7 +1215,8 @@ mod tests {
 
         write_file(dir.path(), "a.txt", "one");
         repo.stage("a.txt").unwrap();
-        repo.commit("init", "Test User", "test@example.com").unwrap();
+        repo.commit("init", "Test User", "test@example.com")
+            .unwrap();
 
         let branches = repo.branches().unwrap();
         assert_eq!(branches.len(), 1);
@@ -1189,7 +1231,8 @@ mod tests {
 
         write_file(dir.path(), "a.txt", "one");
         repo.stage("a.txt").unwrap();
-        repo.commit("init", "Test User", "test@example.com").unwrap();
+        repo.commit("init", "Test User", "test@example.com")
+            .unwrap();
 
         repo.create_branch("feature", None).unwrap();
         repo.checkout_branch("feature").unwrap();
@@ -1206,7 +1249,8 @@ mod tests {
 
         write_file(dir.path(), "a.txt", "one");
         repo.stage("a.txt").unwrap();
-        repo.commit("init", "Test User", "test@example.com").unwrap();
+        repo.commit("init", "Test User", "test@example.com")
+            .unwrap();
 
         repo.create_branch("feature", None).unwrap();
         repo.delete_branch("feature", false).unwrap();
@@ -1236,7 +1280,6 @@ mod tests {
         let branches = local_repo.branches().unwrap();
         assert!(branches.iter().any(|b| b.name == "feature" && !b.is_remote));
     }
-
 
     #[test]
     fn commit_stats_counts_lines_and_periods() {
@@ -1272,7 +1315,6 @@ mod tests {
         assert_eq!(later.previous_count, 2);
     }
 
-
     #[test]
     fn commit_stats_applies_mailmap() {
         let dir = tempfile::tempdir().unwrap();
@@ -1280,10 +1322,12 @@ mod tests {
 
         write_file(dir.path(), "a.txt", "one");
         repo.stage("a.txt").unwrap();
-        repo.commit("old identity", "annie", "ann@old.example").unwrap();
+        repo.commit("old identity", "annie", "ann@old.example")
+            .unwrap();
         write_file(dir.path(), "a.txt", "two");
         repo.stage("a.txt").unwrap();
-        repo.commit("new identity", "Ann Lee", "ann@new.example").unwrap();
+        repo.commit("new identity", "Ann Lee", "ann@new.example")
+            .unwrap();
 
         write_file(
             dir.path(),
@@ -1344,12 +1388,20 @@ mod tests {
         repo.checkout_branch("feature").unwrap();
         write_file(dir.path(), "b.txt", "b");
         repo.stage("b.txt").unwrap();
-        repo.commit("feature work", "Bob", "bob@example.com").unwrap();
+        repo.commit("feature work", "Bob", "bob@example.com")
+            .unwrap();
 
         let report = repo.branch_report().unwrap();
         assert_eq!(report.base.as_deref(), Some(base.as_str()));
-        let feature = report.branches.iter().find(|b| b.name == "feature").unwrap();
-        assert_eq!((feature.ahead, feature.behind, feature.merged), (1, 0, false));
+        let feature = report
+            .branches
+            .iter()
+            .find(|b| b.name == "feature")
+            .unwrap();
+        assert_eq!(
+            (feature.ahead, feature.behind, feature.merged),
+            (1, 0, false)
+        );
         assert!(feature.is_head);
         assert_eq!(feature.last_email, "bob@example.com");
         let merged = report.branches.iter().find(|b| b.name == "merged").unwrap();
@@ -1365,7 +1417,8 @@ mod tests {
 
         write_file(dir.path(), "a.txt", "one");
         repo.stage("a.txt").unwrap();
-        repo.commit("init", "Test User", "test@example.com").unwrap();
+        repo.commit("init", "Test User", "test@example.com")
+            .unwrap();
 
         write_file(dir.path(), "a.txt", "two");
         assert_eq!(
@@ -1380,13 +1433,54 @@ mod tests {
     }
 
     #[test]
+    fn working_file_diff_reports_staged_and_unstaged_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        write_file(dir.path(), "a.txt", "one\n");
+        repo.stage("a.txt").unwrap();
+        repo.commit("init", "Test User", "test@example.com")
+            .unwrap();
+
+        write_file(dir.path(), "a.txt", "two\n");
+        repo.stage("a.txt").unwrap();
+        write_file(dir.path(), "a.txt", "three\n");
+        write_file(dir.path(), "new.txt", "fresh\n");
+
+        let staged = repo.working_file_diff("a.txt", true).unwrap();
+        assert!(staged.contains("@@ -1 +1 @@"), "{staged}");
+        assert!(staged.contains("-one\n") && staged.contains("+two\n"));
+
+        let unstaged = repo.working_file_diff("a.txt", false).unwrap();
+        assert!(unstaged.contains("-two\n") && unstaged.contains("+three\n"));
+
+        let untracked = repo.working_file_diff("new.txt", false).unwrap();
+        assert!(untracked.contains("+fresh\n"), "{untracked}");
+        assert!(!untracked.contains("a.txt"));
+    }
+
+    #[test]
+    fn working_file_diff_handles_unborn_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        write_file(dir.path(), "a.txt", "one\n");
+        repo.stage("a.txt").unwrap();
+
+        let staged = repo.working_file_diff("a.txt", true).unwrap();
+        assert!(staged.contains("+one\n"), "{staged}");
+    }
+
+    #[test]
     fn commit_with_configured_identity_uses_repo_config() {
         let dir = tempfile::tempdir().unwrap();
         let repo = GitRepo::init(dir.path()).unwrap();
         {
             let mut config = repo.repo.config().unwrap();
             config.set_str("user.name", "Configured User").unwrap();
-            config.set_str("user.email", "configured@example.com").unwrap();
+            config
+                .set_str("user.email", "configured@example.com")
+                .unwrap();
         }
 
         write_file(dir.path(), "a.txt", "one");

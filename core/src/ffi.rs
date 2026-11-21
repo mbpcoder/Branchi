@@ -156,8 +156,8 @@ pub unsafe extern "C" fn branchi_commit_stats(
     previous_since: i64,
 ) -> *mut c_char {
     let path = c_str_to_string(path);
-    let result = GitRepo::open(&path)
-        .and_then(|repo| repo.commit_stats(since, until, previous_since));
+    let result =
+        GitRepo::open(&path).and_then(|repo| repo.commit_stats(since, until, previous_since));
     result_to_json_c_string(result)
 }
 
@@ -207,7 +207,11 @@ pub unsafe extern "C" fn branchi_create_branch(
     let path = c_str_to_string(path);
     let name = c_str_to_string(name);
     let from = c_str_to_string(from);
-    let from = if from.is_empty() { None } else { Some(from.as_str()) };
+    let from = if from.is_empty() {
+        None
+    } else {
+        Some(from.as_str())
+    };
     let result = GitRepo::open(&path).and_then(|repo| repo.create_branch(&name, from));
     result_to_c_string(result)
 }
@@ -268,6 +272,26 @@ pub unsafe extern "C" fn branchi_update_branch(
 pub unsafe extern "C" fn branchi_status(path: *const c_char) -> *mut c_char {
     let path = c_str_to_string(path);
     let result = GitRepo::open(&path).and_then(|repo| repo.status());
+    result_to_json_c_string(result)
+}
+
+/// Returns the unified-diff patch of the uncommitted changes to `file_path`
+/// in the repository at `path` as a JSON string: `{"ok": "<patch>"}` or
+/// `{"error": "..."}`. With `staged`, diffs the index against HEAD;
+/// otherwise the working tree against the index.
+///
+/// # Safety
+/// `path` and `file_path` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_working_diff(
+    path: *const c_char,
+    file_path: *const c_char,
+    staged: bool,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let file_path = c_str_to_string(file_path);
+    let result = GitRepo::open(&path).and_then(|repo| repo.working_file_diff(&file_path, staged));
     result_to_json_c_string(result)
 }
 

@@ -37,17 +37,16 @@ pub fn init() {
 
         let file_spec = FileSpec::default().directory(dir).basename("branchi-core");
 
-        let logger = Logger::try_with_str("info")
-            .and_then(|logger| {
-                logger
-                    .log_to_file(file_spec)
-                    .rotate(
-                        Criterion::Age(Age::Day),
-                        Naming::Timestamps,
-                        Cleanup::KeepLogFiles(30),
-                    )
-                    .start()
-            });
+        let logger = Logger::try_with_str("info").and_then(|logger| {
+            logger
+                .log_to_file(file_spec)
+                .rotate(
+                    Criterion::Age(Age::Day),
+                    Naming::Timestamps,
+                    Cleanup::KeepLogFiles(30),
+                )
+                .start()
+        });
 
         if let Err(err) = logger {
             eprintln!("branchi-core: failed to initialize file logger: {err}");

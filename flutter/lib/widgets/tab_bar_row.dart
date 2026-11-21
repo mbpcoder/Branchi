@@ -4,8 +4,8 @@ import '../l10n/app_locale.dart';
 import '../models/repo_tab.dart';
 import '../theme/app_theme.dart';
 
-/// Slim strip of open tabs, always shown under the top bar, with a
-/// trailing "add tab" button. Middle-click a tab to close it.
+/// Slim strip of open tabs, always shown under the top bar, with an
+/// "add tab" button right after the last tab. Middle-click a tab to close it.
 class TabBarRow extends StatelessWidget {
   const TabBarRow({
     super.key,
@@ -34,30 +34,33 @@ class TabBarRow extends StatelessWidget {
         color: b.bg,
         border: Border(bottom: BorderSide(color: b.line)),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: tabs.length,
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              separatorBuilder: (_, __) => const SizedBox(width: 2),
-              itemBuilder: (context, index) => _Tab(
-                title: tabs[index].title,
-                active: index == activeIndex,
-                onTap: () => onSelect(index),
-                onClose: () => onClose(index),
+      // The "add tab" button is the list's last item, so it sits right
+      // after the last open tab and scrolls with the tabs.
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: tabs.length + 1,
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        separatorBuilder: (_, __) => const SizedBox(width: 2),
+        itemBuilder: (context, index) {
+          if (index == tabs.length) {
+            return Center(
+              child: IconButton(
+                tooltip: translate('new_tab'),
+                icon: const Icon(Icons.add, size: 14),
+                constraints:
+                    const BoxConstraints.tightFor(width: 26, height: 26),
+                style: IconButton.styleFrom(minimumSize: const Size(26, 26)),
+                onPressed: onAddTab,
               ),
-            ),
-          ),
-          IconButton(
-            tooltip: translate('new_tab'),
-            icon: const Icon(Icons.add, size: 14),
-            constraints: const BoxConstraints.tightFor(width: 26, height: 26),
-            style: IconButton.styleFrom(minimumSize: const Size(26, 26)),
-            onPressed: onAddTab,
-          ),
-        ],
+            );
+          }
+          return _Tab(
+            title: tabs[index].title,
+            active: index == activeIndex,
+            onTap: () => onSelect(index),
+            onClose: () => onClose(index),
+          );
+        },
       ),
     );
   }

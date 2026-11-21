@@ -8,13 +8,15 @@ import '../theme/app_theme.dart';
 
 /// Content of a folder tab: the repositories one level inside the folder,
 /// "Update all" (fast-forward of each current branch) and an Open button
-/// per repository.
-class FolderUpdateView extends StatelessWidget {
+/// per repository. The table can be filtered by repository name and status;
+/// filters only affect what is shown, never which repositories are updated.
+class FolderUpdateView extends StatefulWidget {
   const FolderUpdateView({
     super.key,
     required this.controller,
     required this.onOpenRepository,
     required this.onChangeFolder,
+    required this.isRepositoryOpen,
   });
 
   final FolderUpdateController controller;
@@ -25,9 +27,64 @@ class FolderUpdateView extends StatelessWidget {
   /// Points this tab at another folder.
   final ValueChanged<String> onChangeFolder;
 
+  /// Whether the repository at the given path is already open in a tab;
+  /// its row's Open button then reads "Go to tab".
+  final bool Function(String path) isRepositoryOpen;
+
+  @override
+  State<FolderUpdateView> createState() => _FolderUpdateViewState();
+}
+
+class _FolderUpdateViewState extends State<FolderUpdateView> {
+  final _searchController = TextEditingController();
+  String _query = '';
+
+  /// Selected status chips; empty means "any status".
+  final Set<FolderRepoStatus> _statuses = {};
+
+  FolderUpdateController get controller => widget.controller;
+
+  @override
+  void didUpdateWidget(FolderUpdateView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Filters belong to the folder they were set on.
+    if (oldWidget.controller != widget.controller) {
+      _searchController.clear();
+      _query = '';
+      _statuses.clear();
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _pickFolder() async {
     final path = await FilePicker.platform.getDirectoryPath();
-    if (path != null) onChangeFolder(path);
+    if (path != null) widget.onChangeFolder(path);
+  }
+
+  bool get _hasFilters => _query.isNotEmpty || _statuses.isNotEmpty;
+
+  void _clearFilters() {
+    _searchController.clear();
+    setState(() {
+      _query = '';
+      _statuses.clear();
+    });
+  }
+
+  List<FolderRepo> _filtered(List<FolderRepo> repos) {
+    final query = _query.toLowerCase();
+    return repos
+        .where(
+          (r) =>
+              (query.isEmpty || r.name.toLowerCase().contains(query)) &&
+              (_statuses.isEmpty || _statuses.contains(r.status)),
+        )
+        .toList();
   }
 
   String _subtitle() {
@@ -57,6 +114,7 @@ class FolderUpdateView extends StatelessWidget {
         final b = context.branchi;
         final c = controller;
         final showProgress = c.isRunning || c.lastRunAt != null;
+        final visible = _filtered(c.repos);
         return SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
           child: Column(
@@ -173,8 +231,32 @@ class FolderUpdateView extends StatelessWidget {
                   translate('folder_update_no_repos'),
                   style: TextStyle(color: b.muted),
                 )
-              else
-                _RepoTable(repos: c.repos, onOpenRepository: onOpenRepository),
+              else ...[
+                _FilterBar(
+                  controller: c,
+                  searchController: _searchController,
+                  selected: _statuses,
+                  showClear: _hasFilters,
+                  onQueryChanged: (value) =>
+                      setState(() => _query = value.trim()),
+                  onToggleStatus: (status) => setState(() {
+                    if (!_statuses.remove(status)) _statuses.add(status);
+                  }),
+                  onClear: _clearFilters,
+                ),
+                const SizedBox(height: 12),
+                if (visible.isEmpty)
+                  Text(
+                    translate('folder_update_no_matches'),
+                    style: TextStyle(color: b.muted),
+                  )
+                else
+                  _RepoTable(
+                    repos: visible,
+                    onOpenRepository: widget.onOpenRepository,
+                    isRepositoryOpen: widget.isRepositoryOpen,
+                  ),
+              ],
               const SizedBox(height: 12),
               Text(
                 translate('folder_update_rules'),
@@ -202,11 +284,102 @@ class FolderUpdateView extends StatelessWidget {
   }
 }
 
+/// Translation key of each status's label; idle has none.
+const _statusLabelKeys = {
+  FolderRepoStatus.waiting: 'folder_update_waiting',
+  FolderRepoStatus.updating: 'folder_update_updating',
+  FolderRepoStatus.updated: 'folder_update_updated',
+  FolderRepoStatus.upToDate: 'folder_update_up_to_date',
+  FolderRepoStatus.skipped: 'folder_update_skipped',
+  FolderRepoStatus.failed: 'folder_update_failed',
+};
+
+/// Name search field plus one chip per status present in the list (with its
+/// count). A selected chip stays visible even if its count drops to zero, so
+/// it can still be deselected.
+class _FilterBar extends StatelessWidget {
+  const _FilterBar({
+    required this.controller,
+    required this.searchController,
+    required this.selected,
+    required this.showClear,
+    required this.onQueryChanged,
+    required this.onToggleStatus,
+    required this.onClear,
+  });
+
+  final FolderUpdateController controller;
+  final TextEditingController searchController;
+  final Set<FolderRepoStatus> selected;
+  final bool showClear;
+  final ValueChanged<String> onQueryChanged;
+  final ValueChanged<FolderRepoStatus> onToggleStatus;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    final statuses = [
+      for (final status in _statusLabelKeys.keys)
+        if (controller.countOf(status) > 0 || selected.contains(status))
+          status,
+    ];
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        SizedBox(
+          width: 260,
+          height: 34,
+          child: TextField(
+            controller: searchController,
+            onChanged: onQueryChanged,
+            style: TextStyle(fontSize: 13, color: b.fg),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: translate('folder_update_search_hint'),
+              prefixIcon: const Icon(Icons.search, size: 16),
+              prefixIconConstraints:
+                  const BoxConstraints(minWidth: 32, minHeight: 32),
+              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+              ),
+            ),
+          ),
+        ),
+        for (final status in statuses)
+          FilterChip(
+            label: Text(
+              '${translate(_statusLabelKeys[status]!)} '
+              '${controller.countOf(status)}',
+              style: const TextStyle(fontSize: 12),
+            ),
+            selected: selected.contains(status),
+            onSelected: (_) => onToggleStatus(status),
+            visualDensity: VisualDensity.compact,
+          ),
+        if (showClear)
+          TextButton(
+            onPressed: onClear,
+            child: Text(translate('folder_update_clear_filters')),
+          ),
+      ],
+    );
+  }
+}
+
 class _RepoTable extends StatelessWidget {
-  const _RepoTable({required this.repos, required this.onOpenRepository});
+  const _RepoTable({
+    required this.repos,
+    required this.onOpenRepository,
+    required this.isRepositoryOpen,
+  });
 
   final List<FolderRepo> repos;
   final ValueChanged<String> onOpenRepository;
+  final bool Function(String path) isRepositoryOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -293,15 +466,27 @@ class _RepoTable extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: () => onOpenRepository(repo.path),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 30),
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                  if (isRepositoryOpen(repo.path))
+                    // Already open in a tab: the button switches to it.
+                    FilledButton.tonalIcon(
+                      onPressed: () => onOpenRepository(repo.path),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 30),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      icon: const Icon(Icons.tab, size: 14),
+                      label: Text(translate('folder_update_go_to_tab')),
+                    )
+                  else
+                    OutlinedButton.icon(
+                      onPressed: () => onOpenRepository(repo.path),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 30),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      icon: const Icon(Icons.open_in_new, size: 14),
+                      label: Text(translate('folder_update_open')),
                     ),
-                    icon: const Icon(Icons.open_in_new, size: 14),
-                    label: Text(translate('folder_update_open')),
-                  ),
                 ],
               ),
             ),

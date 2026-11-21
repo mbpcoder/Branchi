@@ -29,11 +29,9 @@ impl Database {
     /// Open (creating if needed) the SQLite database at `path` and run
     /// pending migrations.
     pub async fn connect(path: impl AsRef<Path>) -> Result<Self> {
-        let options = SqliteConnectOptions::from_str(&format!(
-            "sqlite://{}",
-            path.as_ref().display()
-        ))?
-        .create_if_missing(true);
+        let options =
+            SqliteConnectOptions::from_str(&format!("sqlite://{}", path.as_ref().display()))?
+                .create_if_missing(true);
 
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
@@ -57,15 +55,19 @@ impl Database {
         Ok(Self { pool })
     }
 
-    pub async fn add_repo(&self, name: &str, local_path: &str, remote_url: Option<&str>) -> Result<i64> {
-        let result = sqlx::query(
-            "INSERT INTO repos (name, local_path, remote_url) VALUES (?1, ?2, ?3)",
-        )
-        .bind(name)
-        .bind(local_path)
-        .bind(remote_url)
-        .execute(&self.pool)
-        .await?;
+    pub async fn add_repo(
+        &self,
+        name: &str,
+        local_path: &str,
+        remote_url: Option<&str>,
+    ) -> Result<i64> {
+        let result =
+            sqlx::query("INSERT INTO repos (name, local_path, remote_url) VALUES (?1, ?2, ?3)")
+                .bind(name)
+                .bind(local_path)
+                .bind(remote_url)
+                .execute(&self.pool)
+                .await?;
 
         Ok(result.last_insert_rowid())
     }
@@ -129,7 +131,11 @@ mod tests {
         let db = Database::connect_in_memory().await.unwrap();
 
         let id = db
-            .add_repo("branchi", "/home/user/branchi", Some("https://github.com/mbp165/branchi"))
+            .add_repo(
+                "branchi",
+                "/home/user/branchi",
+                Some("https://github.com/mbp165/branchi"),
+            )
             .await
             .unwrap();
 
@@ -149,9 +155,15 @@ mod tests {
         assert_eq!(db.get_setting("theme").await.unwrap(), None);
 
         db.set_setting("theme", "dark").await.unwrap();
-        assert_eq!(db.get_setting("theme").await.unwrap(), Some("dark".to_string()));
+        assert_eq!(
+            db.get_setting("theme").await.unwrap(),
+            Some("dark".to_string())
+        );
 
         db.set_setting("theme", "light").await.unwrap();
-        assert_eq!(db.get_setting("theme").await.unwrap(), Some("light".to_string()));
+        assert_eq!(
+            db.get_setting("theme").await.unwrap(),
+            Some("light".to_string())
+        );
     }
 }

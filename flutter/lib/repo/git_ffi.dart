@@ -137,6 +137,17 @@ typedef _RevertFileDart = Pointer<Utf8> Function(
   Pointer<Utf8> filePath,
 );
 
+typedef _WorkingDiffNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> filePath,
+  Bool staged,
+);
+typedef _WorkingDiffDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> filePath,
+  bool staged,
+);
+
 typedef _CommitNative = Pointer<Utf8> Function(
   Pointer<Utf8> path,
   Pointer<Utf8> message,
@@ -262,6 +273,10 @@ class GitFfi {
             lib.lookupFunction<_RevertFileNative, _RevertFileDart>(
           'branchi_revert_file',
         ),
+        _workingDiff =
+            lib.lookupFunction<_WorkingDiffNative, _WorkingDiffDart>(
+          'branchi_working_diff',
+        ),
         _commit =
             lib.lookupFunction<_CommitNative, _CommitDart>('branchi_commit'),
         _push = lib.lookupFunction<_PushNative, _PushDart>('branchi_push'),
@@ -322,6 +337,7 @@ class GitFfi {
   final _StageDart _stage;
   final _UnstageDart _unstage;
   final _RevertFileDart _revertFile;
+  final _WorkingDiffDart _workingDiff;
   final _CommitDart _commit;
   final _PushDart _push;
   final _RemotesDart _remotes;
@@ -543,6 +559,20 @@ class GitFfi {
     final filePathPtr = filePath.toNativeUtf8();
     try {
       return _consumeError(_revertFile(pathPtr, filePathPtr));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(filePathPtr);
+    }
+  }
+
+  /// Unified-diff patch of the uncommitted changes to [filePath]: the index
+  /// against HEAD when [staged], else the working tree against the index.
+  /// Throws a [GitFfiException] on failure.
+  String workingDiff(String path, String filePath, {required bool staged}) {
+    final pathPtr = path.toNativeUtf8();
+    final filePathPtr = filePath.toNativeUtf8();
+    try {
+      return _consumeJsonString(_workingDiff(pathPtr, filePathPtr, staged));
     } finally {
       malloc.free(pathPtr);
       malloc.free(filePathPtr);
