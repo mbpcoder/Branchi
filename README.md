@@ -90,6 +90,19 @@ scoop install branchi
 sudo snap install branchi --classic
 ```
 
+**macOS (Homebrew):**
+```bash
+brew tap mbpcoder/branchi https://github.com/mbpcoder/Branchi
+brew install --cask branchi
+```
+Branchi isn't signed with an Apple Developer ID yet, so allow the first
+launch with:
+```bash
+xattr -dr com.apple.quarantine /Applications/Branchi.app
+```
+Or download `branchi-macos.dmg` from the
+[latest release](https://github.com/mbpcoder/Branchi/releases/latest).
+
 To build it yourself, see [Building from source](#building-from-source).
 
 ## Features
