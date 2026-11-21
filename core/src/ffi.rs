@@ -156,8 +156,8 @@ pub unsafe extern "C" fn branchi_commit_stats(
     previous_since: i64,
 ) -> *mut c_char {
     let path = c_str_to_string(path);
-    let result = GitRepo::open(&path)
-        .and_then(|repo| repo.commit_stats(since, until, previous_since));
+    let result =
+        GitRepo::open(&path).and_then(|repo| repo.commit_stats(since, until, previous_since));
     result_to_json_c_string(result)
 }
 
@@ -207,7 +207,11 @@ pub unsafe extern "C" fn branchi_create_branch(
     let path = c_str_to_string(path);
     let name = c_str_to_string(name);
     let from = c_str_to_string(from);
-    let from = if from.is_empty() { None } else { Some(from.as_str()) };
+    let from = if from.is_empty() {
+        None
+    } else {
+        Some(from.as_str())
+    };
     let result = GitRepo::open(&path).and_then(|repo| repo.create_branch(&name, from));
     result_to_c_string(result)
 }
