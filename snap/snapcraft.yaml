@@ -1,11 +1,16 @@
 name: branchi
 base: core22
 version: '0.0.0' # overwritten by CI from the git tag
+title: Branchi
 summary: A git client with a Rust core and a Flutter UI
 license: MIT
 description: |
   Branchi is a desktop git client built with a Rust core (libgit2)
   and a Flutter user interface.
+website: https://github.com/mbpcoder/Branchi
+source-code: https://github.com/mbpcoder/Branchi
+issues: https://github.com/mbpcoder/Branchi/issues
+contact: https://github.com/mbpcoder/Branchi/issues
 grade: stable
 # A git client needs unrestricted access to repositories, ~/.ssh and
 # ~/.gitconfig, so classic confinement is requested (needs Snap Store approval).
@@ -13,12 +18,75 @@ confinement: classic
 architectures:
   - build-on: amd64
 
+lint:
+  ignore:
+    # These are loaded at runtime (dart:ffi / dlopen), so they have no static
+    # consumer for the linter to find.
+    - library:
+        - lib/libflutter_pty.so
+        - usr/lib/x86_64-linux-gnu/libEGL*
+        - usr/lib/x86_64-linux-gnu/libGL*
+        - usr/lib/x86_64-linux-gnu/libgbm.so*
+        - usr/lib/x86_64-linux-gnu/libXxf86vm.so*
+        - usr/lib/x86_64-linux-gnu/libxcb-*.so*
+        - usr/lib/x86_64-linux-gnu/libxshmfence.so*
+        - usr/lib/x86_64-linux-gnu/libcolordprivate.so*
+        - usr/lib/x86_64-linux-gnu/libdconf.so*
+        - usr/lib/x86_64-linux-gnu/libicu*.so*
+        - usr/lib/x86_64-linux-gnu/libwayland-server.so*
+
 apps:
   branchi:
     command: branchi
+    # Point GL/EGL (loaded by Flutter at runtime) at the libraries in the snap,
+    # since the host's drivers may be built against a newer glibc than core22.
+    environment:
+      __EGL_VENDOR_LIBRARY_DIRS: $SNAP/usr/share/glvnd/egl_vendor.d
+      LIBGL_DRIVERS_PATH: $SNAP/usr/lib/x86_64-linux-gnu/dri
 
 parts:
   branchi:
     # Prebuilt Flutter Linux bundle produced by CI (see .github/workflows/release.yml).
     plugin: dump
     source: flutter/build/linux/x64/release/bundle
+    stage-packages:
+      - libgtk-3-0
+      - libegl1
+      - libgl1
+      - libgles2
+      - libegl-mesa0
+      - libgl1-mesa-dri
+    # Helper programs and docs pulled in by the staged packages; the app
+    # doesn't use them.
+    prime:
+      - -usr/bin
+      - -usr/sbin
+      - -usr/libexec
+      - -usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/gdk-pixbuf-query-loaders
+      - -usr/lib/x86_64-linux-gnu/libgtk-3-0/gtk-query-immodules-3.0
+      - -usr/share/doc
+      - -usr/share/man
+    build-packages:
+      - patchelf
+      - file
+    # Classic snaps must not use the host's loader/libraries, so every ELF is
+    # pointed at core22 and the libraries staged above. This is done by hand
+    # instead of `build-attributes: [enable-patchelf]` because that sets
+    # DT_RUNPATH, which only covers an object's direct dependencies: libraries
+    # pulled in indirectly from core22 (libgio -> libmount, libpcre, ...) would
+    # then be loaded from the host and clash with core22's glibc. DT_RPATH is
+    # inherited down the loader chain, so it is used instead.
+    override-prime: |
+      craftctl default
+      cd "$CRAFT_PRIME"
+      core=/snap/core22/current/lib/x86_64-linux-gnu
+      patchelf --set-interpreter /snap/core22/current/lib64/ld-linux-x86-64.so.2 branchi
+      find . -type f \( -name branchi -o -name '*.so' -o -name '*.so.*' \) -print0 |
+        while IFS= read -r -d '' f; do
+          file -b "$f" | grep -q '^ELF' || continue
+          d="$(dirname "$f")"
+          rel_lib="$(realpath --relative-to="$d" lib)"
+          rel_usr="$(realpath --relative-to="$d" usr/lib/x86_64-linux-gnu)"
+          patchelf --force-rpath --set-rpath \
+            "\$ORIGIN:\$ORIGIN/$rel_lib:\$ORIGIN/$rel_usr:$core" "$f"
+        done
