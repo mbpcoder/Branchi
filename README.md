@@ -161,3 +161,18 @@ Once the core and UI are wired together (e.g. via
 same way RustDesk bridges its Rust core into Flutter), `core/` will grow to
 implement the actual git client logic, and the UI in `flutter/` will call
 into it.
+
+## Install
+
+**Windows (Scoop):**
+```powershell
+scoop bucket add branchi https://github.com/mbpcoder/Branchi
+scoop install branchi
+```
+
+**Windows (installer):** download `branchi-setup.exe` from the latest release.
+
+**Linux (Snap):**
+```bash
+sudo snap install branchi --classic
+```

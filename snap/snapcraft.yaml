@@ -1,0 +1,23 @@
+name: branchi
+base: core22
+version: '0.0.0' # overwritten by CI from the git tag
+summary: A git client with a Rust core and a Flutter UI
+description: |
+  Branchi is a desktop git client built with a Rust core (libgit2)
+  and a Flutter user interface.
+grade: stable
+# A git client needs unrestricted access to repositories, ~/.ssh and
+# ~/.gitconfig, so classic confinement is requested (needs Snap Store approval).
+confinement: classic
+architectures:
+  - build-on: amd64
+
+apps:
+  branchi:
+    command: branchi
+
+parts:
+  branchi:
+    # Prebuilt Flutter Linux bundle produced by CI (see .github/workflows/release.yml).
+    plugin: dump
+    source: flutter/build/linux/x64/release/bundle
