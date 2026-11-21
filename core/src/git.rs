@@ -93,13 +93,17 @@ pub struct CommitStat {
     pub email: String,
     /// Author date.
     pub time: DateTime<Utc>,
+    /// The author's UTC offset when they committed, in minutes, so reports
+    /// can show the author's own local time.
+    pub offset_minutes: i32,
     pub is_merge: bool,
     pub additions: usize,
     pub deletions: usize,
     pub files: Vec<FileChangeStat>,
 }
 
-/// An author's whole-history span, keyed by email (case-insensitive).
+/// An author's whole-history span, keyed by email (case-insensitive),
+/// after applying the repository's `.mailmap`.
 #[derive(Debug, Clone, Serialize)]
 pub struct AuthorSpan {
     /// The name on the author's most recent commit.
@@ -745,11 +749,12 @@ impl GitRepo {
         revwalk.push_head()?;
         revwalk.set_sorting(git2::Sort::TIME)?;
 
+        let mailmap = self.repo.mailmap().ok();
         let mut authors: HashMap<String, AuthorSpan> = HashMap::new();
         for oid in revwalk {
             let oid = oid?;
             let commit = self.repo.find_commit(oid)?;
-            let author = commit.author();
+            let author = Self::mapped_author(&commit, mailmap.as_ref())?;
             let seconds = author.when().seconds();
             let time = DateTime::<Utc>::from_timestamp(seconds, 0).unwrap_or_else(Utc::now);
             let name = author.name().unwrap_or("").to_string();
@@ -774,7 +779,10 @@ impl GitRepo {
             }
 
             if seconds >= since && seconds <= until {
-                report.commits.push(self.commit_stat(&commit, name, email, time)?);
+                let offset = author.when().offset_minutes();
+                report
+                    .commits
+                    .push(self.commit_stat(&commit, name, email, time, offset)?);
             } else if seconds >= previous_since && seconds < since {
                 report.previous_count += 1;
             }
@@ -791,6 +799,7 @@ impl GitRepo {
         author: String,
         email: String,
         time: DateTime<Utc>,
+        offset_minutes: i32,
     ) -> Result<CommitStat> {
         let is_merge = commit.parent_count() > 1;
         let mut files = Vec::new();
@@ -828,10 +837,23 @@ impl GitRepo {
             author,
             email,
             time,
+            offset_minutes,
             is_merge,
             additions: files.iter().map(|f| f.additions).sum(),
             deletions: files.iter().map(|f| f.deletions).sum(),
             files,
+        })
+    }
+
+    /// A commit's author with the repository's `.mailmap` applied (so one
+    /// person's old names and emails count as one author).
+    fn mapped_author(
+        commit: &git2::Commit,
+        mailmap: Option<&git2::Mailmap>,
+    ) -> Result<git2::Signature<'static>> {
+        Ok(match mailmap {
+            Some(mailmap) => commit.author_with_mailmap(mailmap)?,
+            None => commit.author().to_owned(),
         })
     }
 
@@ -859,6 +881,7 @@ impl GitRepo {
             None => None,
         };
 
+        let mailmap = self.repo.mailmap().ok();
         let mut branches = Vec::new();
         for entry in self.repo.branches(Some(git2::BranchType::Local))? {
             let (branch, _) = entry?;
@@ -869,7 +892,7 @@ impl GitRepo {
                 continue;
             };
             let commit = self.repo.find_commit(tip)?;
-            let author = commit.author();
+            let author = Self::mapped_author(&commit, mailmap.as_ref())?;
 
             let is_base = base.as_deref() == Some(name.as_str());
             let (ahead, behind, merged) = match base_tip {
@@ -1247,6 +1270,55 @@ mod tests {
         let later = repo.commit_stats(future, future + 10, 0).unwrap();
         assert!(later.commits.is_empty());
         assert_eq!(later.previous_count, 2);
+    }
+
+
+    #[test]
+    fn commit_stats_applies_mailmap() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        repo.commit("old identity", "annie", "ann@old.example").unwrap();
+        write_file(dir.path(), "a.txt", "two");
+        repo.stage("a.txt").unwrap();
+        repo.commit("new identity", "Ann Lee", "ann@new.example").unwrap();
+
+        write_file(
+            dir.path(),
+            ".mailmap",
+            "Ann Lee <ann@new.example> annie <ann@old.example>\n",
+        );
+
+        let report = repo.commit_stats(0, i64::MAX, 0).unwrap();
+        assert_eq!(report.authors.len(), 1);
+        assert_eq!(report.authors[0].email, "ann@new.example");
+        assert_eq!(report.authors[0].commits, 2);
+        assert!(report
+            .commits
+            .iter()
+            .all(|c| c.email == "ann@new.example" && c.author == "Ann Lee"));
+    }
+
+    #[test]
+    fn commit_stats_keeps_author_utc_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+
+        // 2026-01-01 09:00 in Tehran (+03:30).
+        let when = git2::Time::new(1_767_245_400, 210);
+        let sig = git2::Signature::new("Sara", "sara@example.com", &when).unwrap();
+        let tree_id = repo.repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.repo.find_tree(tree_id).unwrap();
+        repo.repo
+            .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+
+        let report = repo.commit_stats(0, i64::MAX, 0).unwrap();
+        assert_eq!(report.commits[0].offset_minutes, 210);
     }
 
     #[test]

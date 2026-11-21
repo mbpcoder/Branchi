@@ -128,6 +128,10 @@ they work in, recent commits, when they commit and their branches. Pick a
 preset (7 days, 30 days, 90 days, a year, all history) or any custom date
 range. Anyone with access to the repository can see its reports.
 
+Authors are matched by email, and the repository's `.mailmap` is respected,
+so one person's old names and addresses count as one author. The heatmap
+uses each author's own local time, taken from their commits.
+
 ### Built-in terminal
 Each repository tab has its own terminal panel with multiple terminal tabs,
 opened in the repository folder. Choose which shell to use in Settings.

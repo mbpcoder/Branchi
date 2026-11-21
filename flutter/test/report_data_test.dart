@@ -8,18 +8,17 @@ ReportCommit commit(
   DateTime time, {
   List<FileChange> files = const [],
   bool merge = false,
-}) =>
-    ReportCommit(
-      id: id.padRight(40, '0'),
-      summary: 'commit $id',
-      author: email.split('@').first,
-      email: email,
-      time: time,
-      isMerge: merge,
-      additions: files.fold(0, (s, f) => s + f.additions),
-      deletions: files.fold(0, (s, f) => s + f.deletions),
-      files: files,
-    );
+}) => ReportCommit(
+  id: id.padRight(40, '0'),
+  summary: 'commit $id',
+  author: email.split('@').first,
+  email: email,
+  time: time,
+  isMerge: merge,
+  additions: files.fold(0, (s, f) => s + f.additions),
+  deletions: files.fold(0, (s, f) => s + f.deletions),
+  files: files,
+);
 
 void main() {
   const greg = AppCalendar(CalendarKind.gregorian, 'en');
@@ -27,14 +26,26 @@ void main() {
   final now = DateTime(2026, 11, 21, 15);
 
   test('presets', () {
-    final p30 = ReportPeriod.fromPreset(PeriodPreset.last30Days, greg, now: now);
+    final p30 = ReportPeriod.fromPreset(
+      PeriodPreset.last30Days,
+      greg,
+      now: now,
+    );
     expect(p30.from, DateTime(2026, 10, 23));
     expect(p30.to, DateTime(2026, 11, 21));
     expect(p30.days, 30);
 
-    final month = ReportPeriod.fromPreset(PeriodPreset.thisMonth, jalali, now: now);
+    final month = ReportPeriod.fromPreset(
+      PeriodPreset.thisMonth,
+      jalali,
+      now: now,
+    );
     expect(month.from, DateTime(2026, 10, 23)); // 1 Aban 1405
-    final last = ReportPeriod.fromPreset(PeriodPreset.lastMonth, jalali, now: now);
+    final last = ReportPeriod.fromPreset(
+      PeriodPreset.lastMonth,
+      jalali,
+      now: now,
+    );
     expect(last.from, DateTime(2026, 9, 23)); // 1 Mehr 1405
     expect(last.to, DateTime(2026, 10, 22));
 
@@ -42,39 +53,94 @@ void main() {
     expect(all.isAll, isTrue);
     expect(all.sinceSeconds, 0);
 
-    final custom = ReportPeriod.custom(DateTime(2026, 9, 10), DateTime(2026, 9, 1));
+    final custom = ReportPeriod.custom(
+      DateTime(2026, 9, 10),
+      DateTime(2026, 9, 1),
+    );
     expect(custom.from, DateTime(2026, 9, 1));
     expect(custom.days, 10);
   });
 
   test('repo and author summaries', () {
-    final period = ReportPeriod.custom(DateTime(2026, 11, 1), DateTime(2026, 11, 14));
+    final period = ReportPeriod.custom(
+      DateTime(2026, 11, 1),
+      DateTime(2026, 11, 14),
+    );
     final data = ReportData(
       period: period,
       commits: [
-        commit('a', 'ann@x.io', DateTime(2026, 11, 2, 10),
-            files: const [FileChange('app/A.php', 10, 2), FileChange('README.md', 1, 0)]),
-        commit('b', 'ANN@x.io', DateTime(2026, 11, 2, 11),
-            files: const [FileChange('app/A.php', 4, 4)]),
-        commit('c', 'bob@x.io', DateTime(2026, 11, 9, 22),
-            files: const [FileChange('README.md', 2, 1)]),
+        commit(
+          'a',
+          'ann@x.io',
+          DateTime(2026, 11, 2, 10),
+          files: const [
+            FileChange('app/A.php', 10, 2),
+            FileChange('README.md', 1, 0),
+          ],
+        ),
+        commit(
+          'b',
+          'ANN@x.io',
+          DateTime(2026, 11, 2, 11),
+          files: const [FileChange('app/A.php', 4, 4)],
+        ),
+        commit(
+          'c',
+          'bob@x.io',
+          DateTime(2026, 11, 9, 22),
+          files: const [FileChange('README.md', 2, 1)],
+        ),
         commit('d', 'bob@x.io', DateTime(2026, 11, 13, 9), merge: true),
       ],
       previousCount: 2,
       authors: {
-        'ann@x.io': AuthorSpan(name: 'Ann', email: 'ann@x.io',
-            first: DateTime(2025, 1, 1), last: DateTime(2026, 11, 2), commits: 50),
-        'bob@x.io': AuthorSpan(name: 'Bob', email: 'bob@x.io',
-            first: DateTime(2026, 11, 9), last: DateTime(2026, 11, 13), commits: 2),
+        'ann@x.io': AuthorSpan(
+          name: 'Ann',
+          email: 'ann@x.io',
+          first: DateTime(2025, 1, 1),
+          last: DateTime(2026, 11, 2),
+          commits: 50,
+        ),
+        'bob@x.io': AuthorSpan(
+          name: 'Bob',
+          email: 'bob@x.io',
+          first: DateTime(2026, 11, 9),
+          last: DateTime(2026, 11, 13),
+          commits: 2,
+        ),
       },
       baseBranch: 'main',
       branches: [
-        BranchStat(name: 'main', isHead: true, lastCommitTime: DateTime(2026, 11, 13),
-            lastAuthor: 'Bob', lastEmail: 'bob@x.io', ahead: 0, behind: 0, merged: false),
-        BranchStat(name: 'old', isHead: false, lastCommitTime: DateTime(2026, 8, 1),
-            lastAuthor: 'Ann', lastEmail: 'ann@x.io', ahead: 3, behind: 40, merged: false),
-        BranchStat(name: 'done', isHead: false, lastCommitTime: DateTime(2026, 8, 1),
-            lastAuthor: 'Ann', lastEmail: 'Ann@x.io', ahead: 0, behind: 9, merged: true),
+        BranchStat(
+          name: 'main',
+          isHead: true,
+          lastCommitTime: DateTime(2026, 11, 13),
+          lastAuthor: 'Bob',
+          lastEmail: 'bob@x.io',
+          ahead: 0,
+          behind: 0,
+          merged: false,
+        ),
+        BranchStat(
+          name: 'old',
+          isHead: false,
+          lastCommitTime: DateTime(2026, 8, 1),
+          lastAuthor: 'Ann',
+          lastEmail: 'ann@x.io',
+          ahead: 3,
+          behind: 40,
+          merged: false,
+        ),
+        BranchStat(
+          name: 'done',
+          isHead: false,
+          lastCommitTime: DateTime(2026, 8, 1),
+          lastAuthor: 'Ann',
+          lastEmail: 'Ann@x.io',
+          ahead: 0,
+          behind: 9,
+          merged: true,
+        ),
       ],
     );
 
@@ -94,7 +160,12 @@ void main() {
     expect(repo.staleBranches, 1);
     expect(repo.mergedBranches, 1);
 
-    final ann = ReportSummary.compute(data, authorKey: 'ann@x.io', calendar: greg, now: now);
+    final ann = ReportSummary.compute(
+      data,
+      authorKey: 'ann@x.io',
+      calendar: greg,
+      now: now,
+    );
     expect(ann.commits.length, 2);
     expect(ann.shareOfCommits, 0.5);
     expect(ann.filesTouched, 2);
@@ -107,8 +178,37 @@ void main() {
     expect(ann.branches.map((b) => b.name), ['old', 'done']);
   });
 
+  test('heatmap uses the author\'s own time zone', () {
+    final utc = DateTime.utc(2026, 11, 2, 6, 0); // Monday 06:00 UTC
+    final tehran = ReportCommit(
+      id: 'x'.padRight(40, '0'),
+      summary: 's',
+      author: 'a',
+      email: 'a@x.io',
+      time: utc.toLocal(),
+      offsetMinutes: 210,
+      isMerge: false,
+      additions: 0,
+      deletions: 0,
+      files: const [],
+    );
+    final data = ReportData(
+      period: ReportPeriod.custom(DateTime(2026, 11, 1), DateTime(2026, 11, 3)),
+      commits: [tehran],
+      previousCount: 0,
+      authors: const {},
+      baseBranch: null,
+      branches: const [],
+    );
+    final s = ReportSummary.compute(data, calendar: greg, now: now);
+    expect(s.heatmap[DateTime.monday][9], 1); // 09:30 in Tehran
+  });
+
   test('long periods bucket by month in the chosen calendar', () {
-    final period = ReportPeriod.custom(DateTime(2025, 3, 21), DateTime(2026, 11, 21));
+    final period = ReportPeriod.custom(
+      DateTime(2025, 3, 21),
+      DateTime(2026, 11, 21),
+    );
     final data = ReportData(
       period: period,
       commits: [commit('a', 'a@x.io', DateTime(2025, 4, 20, 9))],

@@ -27,6 +27,7 @@ class ReportCommit {
     required this.author,
     required this.email,
     required this.time,
+    this.offsetMinutes,
     required this.isMerge,
     required this.additions,
     required this.deletions,
@@ -39,6 +40,7 @@ class ReportCommit {
     author: json['author'] as String,
     email: json['email'] as String,
     time: DateTime.parse(json['time'] as String).toLocal(),
+    offsetMinutes: json['offset_minutes'] as int?,
     isMerge: json['is_merge'] as bool,
     additions: json['additions'] as int,
     deletions: json['deletions'] as int,
@@ -52,8 +54,17 @@ class ReportCommit {
   final String author;
   final String email;
 
-  /// Author date, local time.
+  /// Author date, in the viewer's local time.
   final DateTime time;
+
+  /// The author's UTC offset when committing, in minutes.
+  final int? offsetMinutes;
+
+  /// The author's own wall-clock time for this commit (its fields are the
+  /// author's local date and hour; it's a UTC [DateTime] only as a carrier).
+  DateTime get authorClock => offsetMinutes == null
+      ? time
+      : time.toUtc().add(Duration(minutes: offsetMinutes!));
   final bool isMerge;
   final int additions;
   final int deletions;
@@ -342,7 +353,8 @@ class ReportSummary {
   late final int newContributors;
   late final List<FileStat> hotspots;
 
-  /// `[weekday 1-7][hour 0-23]`, index 0 unused.
+  /// `[weekday 1-7][hour 0-23]` in each author's own local time, index 0
+  /// unused.
   late final List<List<int>> heatmap;
   late final BucketSize bucketSize;
   late final List<ActivityBucket> buckets;
@@ -424,7 +436,8 @@ class ReportSummary {
 
     heatmap = List.generate(8, (_) => List.filled(24, 0));
     for (final c in commits) {
-      heatmap[c.time.weekday][c.time.hour]++;
+      final clock = c.authorClock;
+      heatmap[clock.weekday][clock.hour]++;
     }
 
     _computeBuckets(from);
