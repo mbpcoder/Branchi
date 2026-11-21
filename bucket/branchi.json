@@ -1,12 +1,12 @@
 {
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "A git client with a Rust core and a Flutter UI.",
   "homepage": "https://github.com/mbpcoder/Branchi",
   "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/mbpcoder/Branchi/releases/download/v0.6.0/branchi-windows.zip",
-      "hash": "115f3f92e45741f72d97b85d49c1dc0f408e0be794bfc2637550bc6f09422171"
+      "url": "https://github.com/mbpcoder/Branchi/releases/download/v0.6.1/branchi-windows.zip",
+      "hash": "f24a7c54ae9cdfc5fa50c9050c405492d5a192b552433ade30c487841dfc6c42"
     }
   },
   "bin": "branchi.exe",
