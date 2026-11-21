@@ -4,9 +4,8 @@ import '../l10n/app_locale.dart';
 import '../models/repo_tab.dart';
 import '../theme/app_theme.dart';
 
-/// Slim strip of open repository tabs, shown under the top bar only while
-/// more than one tab is open (the top bar's repo switcher covers the
-/// single-tab case), with a trailing "add tab" button.
+/// Slim strip of open tabs, always shown under the top bar, with a
+/// trailing "add tab" button. Middle-click a tab to close it.
 class TabBarRow extends StatelessWidget {
   const TabBarRow({
     super.key,
@@ -94,6 +93,8 @@ class _TabState extends State<_Tab> {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
+        // Middle-click closes the tab, as in browsers.
+        onTertiaryTapUp: (_) => widget.onClose(),
         child: Container(
           padding: const EdgeInsets.only(left: 10, right: 4),
           decoration: BoxDecoration(

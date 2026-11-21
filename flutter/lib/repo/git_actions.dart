@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 
 import '../logs/action_log.dart';
 import 'git_ffi.dart';
+import '../report/report_data.dart';
 import 'models.dart';
 
 /// Result of a git action: whether it succeeded and, on failure, a message
@@ -98,6 +99,39 @@ class GitActions {
         .cast<Map<String, dynamic>>()
         .map(CommitEntry.fromJson)
         .toList();
+  }
+
+  /// The Report section's data for [period]: its commits with line
+  /// counts, the previous period's commit count, every author's span and
+  /// the local branches compared with the base branch. Runs on a
+  /// background isolate since it diffs every commit in the period.
+  static Future<ReportData> report(String path, ReportPeriod period) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) throw StateError(_missingLibraryErrorWithPaths());
+
+    final since = period.sinceSeconds;
+    final until = period.untilSeconds;
+    final previousSince = period.previousSinceSeconds;
+    final (stats, branchReport) = await Isolate.run(
+      () => (
+        ffi.commitStats(path, since, until, previousSince),
+        ffi.branchReport(path),
+      ),
+    );
+    final authors = (stats['authors'] as List<dynamic>)
+        .map((a) => AuthorSpan.fromJson(a as Map<String, dynamic>));
+    return ReportData(
+      period: period,
+      commits: (stats['commits'] as List<dynamic>)
+          .map((c) => ReportCommit.fromJson(c as Map<String, dynamic>))
+          .toList(),
+      previousCount: period.isAll ? 0 : stats['previous_count'] as int,
+      authors: {for (final a in authors) a.key: a},
+      baseBranch: branchReport['base'] as String?,
+      branches: (branchReport['branches'] as List<dynamic>)
+          .map((b) => BranchStat.fromJson(b as Map<String, dynamic>))
+          .toList(),
+    );
   }
 
   /// Local and remote-tracking branches.

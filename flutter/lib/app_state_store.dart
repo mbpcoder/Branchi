@@ -4,13 +4,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const String _prefsKey = 'branchi_app_state';
 
-/// A single persisted tab: an unattached start-page tab has [path] == null.
+/// A single persisted tab: an unattached start-page tab has [path] == null;
+/// a folder tab has [folderPath] set instead.
 /// Terminal state is per-tab, so restoring a terminal spawns it in that
 /// tab's own repo directory rather than wherever the app process started.
 class PersistedTab {
   const PersistedTab({
     required this.title,
     this.path,
+    this.folderPath,
     this.terminalTitles = const [],
     this.activeTerminalIndex = 0,
     this.isTerminalOpen = false,
@@ -18,6 +20,7 @@ class PersistedTab {
 
   final String title;
   final String? path;
+  final String? folderPath;
   final List<String> terminalTitles;
   final int activeTerminalIndex;
   final bool isTerminalOpen;
@@ -25,6 +28,7 @@ class PersistedTab {
   Map<String, dynamic> toJson() => {
         'title': title,
         'path': path,
+        'folderPath': folderPath,
         'terminalTitles': terminalTitles,
         'activeTerminalIndex': activeTerminalIndex,
         'isTerminalOpen': isTerminalOpen,
@@ -36,6 +40,7 @@ class PersistedTab {
     return PersistedTab(
       title: json['title'] as String? ?? 'New Tab',
       path: json['path'] as String?,
+      folderPath: json['folderPath'] as String?,
       terminalTitles: terminalTitlesJson.map((t) => t as String).toList(),
       activeTerminalIndex: json['activeTerminalIndex'] as int? ?? 0,
       isTerminalOpen: json['isTerminalOpen'] as bool? ?? false,

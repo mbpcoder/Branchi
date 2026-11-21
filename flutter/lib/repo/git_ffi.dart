@@ -37,6 +37,22 @@ typedef _IsRepositoryDart = bool Function(Pointer<Utf8> path);
 typedef _LogNative = Pointer<Utf8> Function(Pointer<Utf8> path, IntPtr limit);
 typedef _LogDart = Pointer<Utf8> Function(Pointer<Utf8> path, int limit);
 
+typedef _CommitStatsNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Int64 since,
+  Int64 until,
+  Int64 previousSince,
+);
+typedef _CommitStatsDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  int since,
+  int until,
+  int previousSince,
+);
+
+typedef _BranchReportNative = Pointer<Utf8> Function(Pointer<Utf8> path);
+typedef _BranchReportDart = Pointer<Utf8> Function(Pointer<Utf8> path);
+
 typedef _BranchesNative = Pointer<Utf8> Function(Pointer<Utf8> path);
 typedef _BranchesDart = Pointer<Utf8> Function(Pointer<Utf8> path);
 
@@ -204,6 +220,14 @@ class GitFfi {
         _isRepository = lib.lookupFunction<_IsRepositoryNative,
             _IsRepositoryDart>('branchi_is_repository'),
         _log = lib.lookupFunction<_LogNative, _LogDart>('branchi_log'),
+        _commitStats =
+            lib.lookupFunction<_CommitStatsNative, _CommitStatsDart>(
+          'branchi_commit_stats',
+        ),
+        _branchReport =
+            lib.lookupFunction<_BranchReportNative, _BranchReportDart>(
+          'branchi_branch_report',
+        ),
         _branches = lib.lookupFunction<_BranchesNative, _BranchesDart>(
           'branchi_branches',
         ),
@@ -286,6 +310,8 @@ class GitFfi {
   final _CloneDart _clone;
   final _IsRepositoryDart _isRepository;
   final _LogDart _log;
+  final _CommitStatsDart _commitStats;
+  final _BranchReportDart _branchReport;
   final _BranchesDart _branches;
   final _CommitDiffDart _commitDiff;
   final _CheckoutBranchDart _checkoutBranch;
@@ -356,6 +382,37 @@ class GitFfi {
     final pathPtr = path.toNativeUtf8();
     try {
       return _consumeJsonList(_log(pathPtr, limit));
+    } finally {
+      malloc.free(pathPtr);
+    }
+  }
+
+  /// Commits whose author date is in [since, until] (Unix seconds) with
+  /// line counts, the commit count in [previousSince, since), and every
+  /// author's whole-history span, as raw decoded JSON. Throws a
+  /// [GitFfiException] on failure.
+  Map<String, dynamic> commitStats(
+    String path,
+    int since,
+    int until,
+    int previousSince,
+  ) {
+    final pathPtr = path.toNativeUtf8();
+    try {
+      return _consumeJsonMap(
+        _commitStats(pathPtr, since, until, previousSince),
+      );
+    } finally {
+      malloc.free(pathPtr);
+    }
+  }
+
+  /// Every local branch compared with the base branch, as raw decoded
+  /// JSON. Throws a [GitFfiException] on failure.
+  Map<String, dynamic> branchReport(String path) {
+    final pathPtr = path.toNativeUtf8();
+    try {
+      return _consumeJsonMap(_branchReport(pathPtr));
     } finally {
       malloc.free(pathPtr);
     }

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../report/report_controller.dart';
 import '../settings/watcher_preferences.dart';
 import 'branch_watcher.dart';
 import 'git_actions.dart';
@@ -18,6 +19,9 @@ enum RepoSection {
 
   /// File tree + code editor.
   files,
+
+  /// Activity report: whole repository or one author.
+  report,
 }
 
 /// Per-repository-tab state shared between the window's top bar and the
@@ -35,6 +39,9 @@ class RepoController extends ChangeNotifier {
   final String repoPath;
 
   late final BranchWatcher watcher;
+
+  /// Report section filters and data, kept while the tab is open.
+  late final ReportController report = ReportController(repoPath);
 
   final StreamController<void> _repositoryChanged =
       StreamController<void>.broadcast();
@@ -169,6 +176,7 @@ class RepoController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     watcher.dispose();
+    report.dispose();
     _repositoryChanged.close();
     super.dispose();
   }

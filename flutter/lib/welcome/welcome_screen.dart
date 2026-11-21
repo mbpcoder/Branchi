@@ -7,6 +7,7 @@ import '../app_state_store.dart';
 import '../l10n/app_locale.dart';
 import '../logs/logs_panel.dart';
 import '../models/repo_tab.dart';
+import '../repo/recent_repositories_store.dart';
 import '../repo/repository_view.dart';
 import '../settings/settings_route.dart';
 import '../settings/shell_preferences.dart';
@@ -16,10 +17,11 @@ import '../theme/app_theme.dart';
 import '../widgets/app_top_bar.dart';
 import '../widgets/bottom_toolbar.dart';
 import '../widgets/tab_bar_row.dart';
+import 'folder_update_view.dart';
 import 'welcome_form.dart';
 
 /// The app's main window: the top bar (with repo switcher, section tabs and
-/// remote actions), a slim tab strip while several tabs are open, the
+/// remote actions), the tab strip (always visible), the
 /// active tab's content (start page or an opened repository), the terminal
 /// and logs panels, and the footer.
 class WelcomeScreen extends StatefulWidget {
@@ -57,13 +59,18 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       restoredTabs = [];
       for (var i = 0; i < saved.tabs.length; i++) {
         final persisted = saved.tabs[i];
-        final tab = RepoTab(id: i, title: persisted.title, path: persisted.path);
+        final tab = RepoTab(
+          id: i,
+          title: persisted.title,
+          path: persisted.path,
+          folderPath: persisted.path == null ? persisted.folderPath : null,
+        );
         tab.terminalSessions.addAll([
           for (var j = 0; j < persisted.terminalTitles.length; j++)
             spawnTerminalSession(
               j,
               persisted.terminalTitles[j],
-              workingDirectory: tab.path,
+              workingDirectory: tab.path ?? tab.folderPath,
             ),
         ]);
         tab.nextTerminalId = tab.terminalSessions.length;
@@ -108,6 +115,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             PersistedTab(
               title: tab.title,
               path: tab.path,
+              folderPath: tab.folderPath,
               terminalTitles: [
                 for (final session in tab.terminalSessions) session.title,
               ],
@@ -134,6 +142,16 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     _saveState();
   }
 
+  /// Opens the terminal panel with a fresh terminal tab in the active
+  /// tab's repository folder.
+  Future<void> _openNewTerminal() async {
+    final tab = _tabs[_activeTabIndex];
+    await _addTerminalTab();
+    if (!mounted) return;
+    setState(() => tab.isTerminalOpen = true);
+    _saveState();
+  }
+
   void _toggleLogs() {
     final tab = _tabs[_activeTabIndex];
     setState(() => tab.isLogsOpen = !tab.isLogsOpen);
@@ -144,7 +162,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     final session = spawnTerminalSession(
       tab.nextTerminalId,
       '${translate('terminal')} ${tab.nextTerminalId + 1}',
-      workingDirectory: tab.path,
+      workingDirectory: tab.path ?? tab.folderPath,
       shellExecutable: shell?.executable,
     );
     tab.nextTerminalId++;
@@ -188,6 +206,41 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     super.dispose();
   }
 
+  /// Opens [path] as a folder tab: a new tab next to the others, listing
+  /// the repositories inside it.
+  void _openFolderTab(String path) {
+    setState(() {
+      _tabs.add(
+        RepoTab(id: _nextTabId, title: p.basename(path), folderPath: path),
+      );
+      _nextTabId++;
+      _activeTabIndex = _tabs.length - 1;
+    });
+    _saveState();
+  }
+
+  /// Points the active folder tab at another folder.
+  void _changeActiveTabFolder(String path) {
+    setState(() {
+      final tab = _tabs[_activeTabIndex];
+      tab.folderPath = path;
+      tab.title = p.basename(path);
+    });
+    _saveState();
+  }
+
+  /// Opens the repository at [path] in a new tab, e.g. from a folder tab.
+  Future<void> _openRepositoryInNewTab(String path) async {
+    await RecentRepositoriesStore.addOrPromote(path);
+    if (!mounted) return;
+    setState(() {
+      _tabs.add(RepoTab(id: _nextTabId, title: p.basename(path), path: path));
+      _nextTabId++;
+      _activeTabIndex = _tabs.length - 1;
+    });
+    _saveState();
+  }
+
   void _addTab() {
     setState(() {
       _tabs.add(RepoTab(id: _nextTabId, title: 'New Tab'));
@@ -208,6 +261,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       setState(() {
         removed
           ..path = null
+          ..folderPath = null
           ..title = 'New Tab'
           ..isTerminalOpen = false
           ..isLogsOpen = false
@@ -291,14 +345,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 isPinned: _isPinned,
                 onTogglePin: _togglePin,
               ),
-              if (_tabs.length > 1)
-                TabBarRow(
-                  tabs: _tabs,
-                  activeIndex: _activeTabIndex,
-                  onSelect: _selectTab,
-                  onClose: _closeTab,
-                  onAddTab: _addTab,
-                ),
+              TabBarRow(
+                tabs: _tabs,
+                activeIndex: _activeTabIndex,
+                onSelect: _selectTab,
+                onClose: _closeTab,
+                onAddTab: _addTab,
+              ),
               Expanded(
                 child: tab.path != null && tab.controller != null
                     ? RepositoryView(
@@ -307,11 +360,20 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                         controller: tab.controller!,
                         onLanguageChanged: (label) =>
                             setState(() => tab.fileTypeLabel = label),
+                        onOpenInTerminal: _openNewTerminal,
                       )
-                    : WelcomeForm(
-                        key: ValueKey(tab.id),
-                        onRepositoryOpened: _setActiveTabRepository,
-                      ),
+                    : tab.folderUpdate != null
+                        ? FolderUpdateView(
+                            key: ValueKey(tab.id),
+                            controller: tab.folderUpdate!,
+                            onOpenRepository: _openRepositoryInNewTab,
+                            onChangeFolder: _changeActiveTabFolder,
+                          )
+                        : WelcomeForm(
+                            key: ValueKey(tab.id),
+                            onRepositoryOpened: _setActiveTabRepository,
+                            onUpdateFolderSelected: _openFolderTab,
+                          ),
               ),
               if (tab.isTerminalOpen)
                 TerminalPanel(

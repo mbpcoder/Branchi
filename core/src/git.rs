@@ -74,6 +74,79 @@ pub struct DiffFileEntry {
     pub patch: String,
 }
 
+/// Lines added/removed in one file by one commit.
+#[derive(Debug, Clone, Serialize)]
+pub struct FileChangeStat {
+    pub path: String,
+    pub additions: usize,
+    pub deletions: usize,
+}
+
+/// One commit with its line counts, for reports. Merge commits carry no
+/// line counts or files (like `git log --numstat`), since diffing them
+/// against one parent would count the merged work twice.
+#[derive(Debug, Clone, Serialize)]
+pub struct CommitStat {
+    pub id: String,
+    pub summary: String,
+    pub author: String,
+    pub email: String,
+    /// Author date.
+    pub time: DateTime<Utc>,
+    /// The author's UTC offset when they committed, in minutes, so reports
+    /// can show the author's own local time.
+    pub offset_minutes: i32,
+    pub is_merge: bool,
+    pub additions: usize,
+    pub deletions: usize,
+    pub files: Vec<FileChangeStat>,
+}
+
+/// An author's whole-history span, keyed by email (case-insensitive),
+/// after applying the repository's `.mailmap`.
+#[derive(Debug, Clone, Serialize)]
+pub struct AuthorSpan {
+    /// The name on the author's most recent commit.
+    pub name: String,
+    pub email: String,
+    pub first: DateTime<Utc>,
+    pub last: DateTime<Utc>,
+    pub commits: usize,
+}
+
+/// Data behind the Report section: the commits in a period (with line
+/// counts), how many commits the period before it had, and every author's
+/// first/last commit over all of history.
+#[derive(Debug, Clone, Serialize)]
+pub struct CommitStatsReport {
+    pub commits: Vec<CommitStat>,
+    pub previous_count: usize,
+    pub authors: Vec<AuthorSpan>,
+}
+
+/// A local branch compared with the base branch (`main`, else `master`,
+/// else the current branch).
+#[derive(Debug, Clone, Serialize)]
+pub struct BranchStat {
+    pub name: String,
+    pub is_head: bool,
+    pub last_commit_time: DateTime<Utc>,
+    pub last_author: String,
+    pub last_email: String,
+    /// Commits on this branch that the base doesn't have.
+    pub ahead: usize,
+    /// Commits on the base that this branch doesn't have.
+    pub behind: usize,
+    /// Fully contained in the base (and not the base itself).
+    pub merged: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BranchReport {
+    pub base: Option<String>,
+    pub branches: Vec<BranchStat>,
+}
+
 impl GitRepo {
     /// Open an existing repository at `path`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -651,6 +724,202 @@ impl GitRepo {
         Ok(oid.to_string())
     }
 
+    /// Commits reachable from HEAD whose author date is in
+    /// `[since, until]` (Unix seconds), with per-file line counts; plus the
+    /// number of commits in `[previous_since, since)` and every author's
+    /// span over all of history. An unborn HEAD gives an empty report.
+    pub fn commit_stats(
+        &self,
+        since: i64,
+        until: i64,
+        previous_since: i64,
+    ) -> Result<CommitStatsReport> {
+        use std::collections::HashMap;
+
+        let mut report = CommitStatsReport {
+            commits: Vec::new(),
+            previous_count: 0,
+            authors: Vec::new(),
+        };
+        if self.repo.head().is_err() {
+            return Ok(report);
+        }
+
+        let mut revwalk = self.repo.revwalk()?;
+        revwalk.push_head()?;
+        revwalk.set_sorting(git2::Sort::TIME)?;
+
+        let mailmap = self.repo.mailmap().ok();
+        let mut authors: HashMap<String, AuthorSpan> = HashMap::new();
+        for oid in revwalk {
+            let oid = oid?;
+            let commit = self.repo.find_commit(oid)?;
+            let author = Self::mapped_author(&commit, mailmap.as_ref())?;
+            let seconds = author.when().seconds();
+            let time = DateTime::<Utc>::from_timestamp(seconds, 0).unwrap_or_else(Utc::now);
+            let name = author.name().unwrap_or("").to_string();
+            let email = author.email().unwrap_or("").to_string();
+
+            let span = authors
+                .entry(email.to_lowercase())
+                .or_insert_with(|| AuthorSpan {
+                    name: name.clone(),
+                    email: email.clone(),
+                    first: time,
+                    last: time,
+                    commits: 0,
+                });
+            span.commits += 1;
+            if time < span.first {
+                span.first = time;
+            }
+            if time > span.last {
+                span.last = time;
+                span.name = name.clone();
+            }
+
+            if seconds >= since && seconds <= until {
+                let offset = author.when().offset_minutes();
+                report
+                    .commits
+                    .push(self.commit_stat(&commit, name, email, time, offset)?);
+            } else if seconds >= previous_since && seconds < since {
+                report.previous_count += 1;
+            }
+        }
+
+        report.authors = authors.into_values().collect();
+        report.authors.sort_by(|a, b| b.commits.cmp(&a.commits));
+        Ok(report)
+    }
+
+    fn commit_stat(
+        &self,
+        commit: &git2::Commit,
+        author: String,
+        email: String,
+        time: DateTime<Utc>,
+        offset_minutes: i32,
+    ) -> Result<CommitStat> {
+        let is_merge = commit.parent_count() > 1;
+        let mut files = Vec::new();
+        if !is_merge {
+            let tree = commit.tree()?;
+            let parent_tree = commit.parents().next().map(|p| p.tree()).transpose()?;
+            let diff = self
+                .repo
+                .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
+            for (index, delta) in diff.deltas().enumerate() {
+                let path = delta
+                    .new_file()
+                    .path()
+                    .or_else(|| delta.old_file().path())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                // Binary files have no patch, so no line counts.
+                let (additions, deletions) = match git2::Patch::from_diff(&diff, index)? {
+                    Some(patch) => {
+                        let (_, additions, deletions) = patch.line_stats()?;
+                        (additions, deletions)
+                    }
+                    None => (0, 0),
+                };
+                files.push(FileChangeStat {
+                    path,
+                    additions,
+                    deletions,
+                });
+            }
+        }
+        Ok(CommitStat {
+            id: commit.id().to_string(),
+            summary: commit.summary().unwrap_or("").to_string(),
+            author,
+            email,
+            time,
+            offset_minutes,
+            is_merge,
+            additions: files.iter().map(|f| f.additions).sum(),
+            deletions: files.iter().map(|f| f.deletions).sum(),
+            files,
+        })
+    }
+
+    /// A commit's author with the repository's `.mailmap` applied (so one
+    /// person's old names and emails count as one author).
+    fn mapped_author(
+        commit: &git2::Commit,
+        mailmap: Option<&git2::Mailmap>,
+    ) -> Result<git2::Signature<'static>> {
+        Ok(match mailmap {
+            Some(mailmap) => commit.author_with_mailmap(mailmap)?,
+            None => commit.author().to_owned(),
+        })
+    }
+
+    /// Every local branch's last commit and how it compares with the base
+    /// branch (`main`, else `master`, else the current branch).
+    pub fn branch_report(&self) -> Result<BranchReport> {
+        let head_name = self
+            .repo
+            .head()
+            .ok()
+            .filter(|h| h.is_branch())
+            .and_then(|h| h.shorthand().map(str::to_string));
+
+        let base = ["main", "master"]
+            .into_iter()
+            .map(str::to_string)
+            .find(|name| self.repo.find_branch(name, git2::BranchType::Local).is_ok())
+            .or_else(|| head_name.clone());
+        let base_tip = match &base {
+            Some(name) => self
+                .repo
+                .find_branch(name, git2::BranchType::Local)?
+                .get()
+                .target(),
+            None => None,
+        };
+
+        let mailmap = self.repo.mailmap().ok();
+        let mut branches = Vec::new();
+        for entry in self.repo.branches(Some(git2::BranchType::Local))? {
+            let (branch, _) = entry?;
+            let Some(name) = branch.name()?.map(str::to_string) else {
+                continue;
+            };
+            let Some(tip) = branch.get().target() else {
+                continue;
+            };
+            let commit = self.repo.find_commit(tip)?;
+            let author = Self::mapped_author(&commit, mailmap.as_ref())?;
+
+            let is_base = base.as_deref() == Some(name.as_str());
+            let (ahead, behind, merged) = match base_tip {
+                Some(base_tip) if !is_base => {
+                    let (ahead, behind) = self.repo.graph_ahead_behind(tip, base_tip)?;
+                    (ahead, behind, ahead == 0)
+                }
+                _ => (0, 0, false),
+            };
+
+            branches.push(BranchStat {
+                is_head: head_name.as_deref() == Some(name.as_str()),
+                name,
+                last_commit_time: DateTime::<Utc>::from_timestamp(author.when().seconds(), 0)
+                    .unwrap_or_else(Utc::now),
+                last_author: author.name().unwrap_or("").to_string(),
+                last_email: author.email().unwrap_or("").to_string(),
+                ahead,
+                behind,
+                merged,
+            });
+        }
+        branches.sort_by(|a, b| b.last_commit_time.cmp(&a.last_commit_time));
+
+        Ok(BranchReport { base, branches })
+    }
+
     /// Lists this repository's configured remotes (name and fetch URL).
     pub fn remotes(&self) -> Result<Vec<RemoteInfo>> {
         let names = self.repo.remotes()?;
@@ -966,6 +1235,127 @@ mod tests {
 
         let branches = local_repo.branches().unwrap();
         assert!(branches.iter().any(|b| b.name == "feature" && !b.is_remote));
+    }
+
+
+    #[test]
+    fn commit_stats_counts_lines_and_periods() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        write_file(dir.path(), "a.txt", "one\ntwo\n");
+        repo.stage("a.txt").unwrap();
+        repo.commit("first", "Ann", "ann@example.com").unwrap();
+
+        write_file(dir.path(), "a.txt", "one\nthree\nfour\n");
+        write_file(dir.path(), "b.txt", "b\n");
+        repo.stage("a.txt").unwrap();
+        repo.stage("b.txt").unwrap();
+        repo.commit("second", "Bob", "BOB@example.com").unwrap();
+
+        let all = repo.commit_stats(0, i64::MAX, 0).unwrap();
+        assert_eq!(all.commits.len(), 2);
+        assert_eq!(all.previous_count, 0);
+        let second = all.commits.iter().find(|c| c.summary == "second").unwrap();
+        assert!(!second.is_merge);
+        assert_eq!(second.additions, 3);
+        assert_eq!(second.deletions, 1);
+        assert_eq!(second.files.len(), 2);
+        let first = all.commits.iter().find(|c| c.summary == "first").unwrap();
+        assert_eq!(first.additions, 2);
+        assert_eq!(all.authors.len(), 2);
+
+        // A period that ends before the commits counts them as "previous".
+        let future = Utc::now().timestamp() + 1000;
+        let later = repo.commit_stats(future, future + 10, 0).unwrap();
+        assert!(later.commits.is_empty());
+        assert_eq!(later.previous_count, 2);
+    }
+
+
+    #[test]
+    fn commit_stats_applies_mailmap() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        repo.commit("old identity", "annie", "ann@old.example").unwrap();
+        write_file(dir.path(), "a.txt", "two");
+        repo.stage("a.txt").unwrap();
+        repo.commit("new identity", "Ann Lee", "ann@new.example").unwrap();
+
+        write_file(
+            dir.path(),
+            ".mailmap",
+            "Ann Lee <ann@new.example> annie <ann@old.example>\n",
+        );
+
+        let report = repo.commit_stats(0, i64::MAX, 0).unwrap();
+        assert_eq!(report.authors.len(), 1);
+        assert_eq!(report.authors[0].email, "ann@new.example");
+        assert_eq!(report.authors[0].commits, 2);
+        assert!(report
+            .commits
+            .iter()
+            .all(|c| c.email == "ann@new.example" && c.author == "Ann Lee"));
+    }
+
+    #[test]
+    fn commit_stats_keeps_author_utc_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+
+        // 2026-01-01 09:00 in Tehran (+03:30).
+        let when = git2::Time::new(1_767_245_400, 210);
+        let sig = git2::Signature::new("Sara", "sara@example.com", &when).unwrap();
+        let tree_id = repo.repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.repo.find_tree(tree_id).unwrap();
+        repo.repo
+            .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+
+        let report = repo.commit_stats(0, i64::MAX, 0).unwrap();
+        assert_eq!(report.commits[0].offset_minutes, 210);
+    }
+
+    #[test]
+    fn commit_stats_on_empty_repo_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        let report = repo.commit_stats(0, i64::MAX, 0).unwrap();
+        assert!(report.commits.is_empty());
+        assert!(report.authors.is_empty());
+    }
+
+    #[test]
+    fn branch_report_compares_with_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        repo.commit("init", "Ann", "ann@example.com").unwrap();
+        let base = repo.repo.head().unwrap().shorthand().unwrap().to_string();
+
+        repo.create_branch("merged", None).unwrap();
+        repo.create_branch("feature", None).unwrap();
+        repo.checkout_branch("feature").unwrap();
+        write_file(dir.path(), "b.txt", "b");
+        repo.stage("b.txt").unwrap();
+        repo.commit("feature work", "Bob", "bob@example.com").unwrap();
+
+        let report = repo.branch_report().unwrap();
+        assert_eq!(report.base.as_deref(), Some(base.as_str()));
+        let feature = report.branches.iter().find(|b| b.name == "feature").unwrap();
+        assert_eq!((feature.ahead, feature.behind, feature.merged), (1, 0, false));
+        assert!(feature.is_head);
+        assert_eq!(feature.last_email, "bob@example.com");
+        let merged = report.branches.iter().find(|b| b.name == "merged").unwrap();
+        assert!(merged.merged);
+        let base_stat = report.branches.iter().find(|b| b.name == base).unwrap();
+        assert!(!base_stat.merged);
     }
 
     #[test]

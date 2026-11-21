@@ -87,11 +87,16 @@ class BranchSidebar extends StatefulWidget {
     required this.onWatchIntervalChanged,
     required this.isUpdatingCurrentBranch,
     required this.onUpdateCurrentBranch,
+    this.onOpenInTerminal,
     this.width = 220,
   });
 
   final String repoPath;
   final List<BranchEntry> branches;
+
+  /// Opens a new built-in terminal tab in the repository folder. The menu
+  /// item is hidden when this is null.
+  final VoidCallback? onOpenInTerminal;
 
   /// Called after a branch action (checkout/create/delete/update) succeeds,
   /// so the caller can reload the repository's commits and branches.
@@ -361,6 +366,11 @@ class _BranchSidebarState extends State<BranchSidebar> {
           value: 'explorer',
           child: Text('Open in file explorer'),
         ),
+        if (widget.onOpenInTerminal != null)
+          const PopupMenuItem(
+            value: 'terminal',
+            child: Text('Open in terminal'),
+          ),
       ],
     );
     if (!mounted || action == null) return;
@@ -373,6 +383,9 @@ class _BranchSidebarState extends State<BranchSidebar> {
         break;
       case 'explorer':
         await _openInFileExplorer();
+        break;
+      case 'terminal':
+        widget.onOpenInTerminal?.call();
         break;
     }
   }

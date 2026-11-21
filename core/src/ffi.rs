@@ -141,6 +141,39 @@ pub unsafe extern "C" fn branchi_commit_diff(
     result_to_json_c_string(result)
 }
 
+/// Returns the Report section's commit data as a JSON string:
+/// `{"ok": CommitStatsReport}` or `{"error": "..."}`. `since`, `until`
+/// and `previous_since` are Unix seconds (see `GitRepo::commit_stats`).
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
+/// call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_commit_stats(
+    path: *const c_char,
+    since: i64,
+    until: i64,
+    previous_since: i64,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let result = GitRepo::open(&path)
+        .and_then(|repo| repo.commit_stats(since, until, previous_since));
+    result_to_json_c_string(result)
+}
+
+/// Returns every local branch compared with the base branch as a JSON
+/// string: `{"ok": BranchReport}` or `{"error": "..."}`.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
+/// call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_branch_report(path: *const c_char) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let result = GitRepo::open(&path).and_then(|repo| repo.branch_report());
+    result_to_json_c_string(result)
+}
+
 /// Checks out an existing local branch `name` in the repository at `path`.
 ///
 /// # Safety

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../code/code_view.dart';
+import '../report/report_data.dart';
+import '../report/report_view.dart';
 import 'branch_sidebar.dart';
 import 'column_resize_handle.dart';
 import 'commit_detail.dart';
@@ -29,6 +31,7 @@ class RepositoryView extends StatefulWidget {
     required this.path,
     required this.controller,
     this.onLanguageChanged,
+    this.onOpenInTerminal,
   });
 
   final String path;
@@ -40,6 +43,9 @@ class RepositoryView extends StatefulWidget {
   /// Forwarded to the Code tab so the app's bottom bar can show the active
   /// file's detected type.
   final ValueChanged<String?>? onLanguageChanged;
+
+  /// Opens a new built-in terminal tab in the repository folder.
+  final VoidCallback? onOpenInTerminal;
 
   @override
   State<RepositoryView> createState() => RepositoryViewState();
@@ -145,6 +151,24 @@ class RepositoryViewState extends State<RepositoryView> {
 
   void _setSection(RepoSection section) {
     _controller.section = section;
+  }
+
+  /// Switches to History with [commit] selected (from the Report).
+  void _showCommit(ReportCommit commit) {
+    _setSection(RepoSection.history);
+    final listed = _commits.where((c) => c.id == commit.id);
+    _selectCommit(
+      listed.isNotEmpty
+          ? listed.first
+          : CommitEntry(
+              id: commit.id,
+              summary: commit.summary,
+              author: commit.author,
+              email: commit.email,
+              time: commit.time.toUtc(),
+              parentIds: const [],
+            ),
+    );
   }
 
   /// Checks out [branchName] and reloads.
@@ -412,6 +436,12 @@ class RepositoryViewState extends State<RepositoryView> {
       return Center(child: Text('Failed to load repository: $_loadError'));
     }
 
+    if (_section == RepoSection.report) {
+      return ReportView(
+        controller: _controller.report,
+        onOpenCommit: _showCommit,
+      );
+    }
     if (_section == RepoSection.files) {
       return CodeView(
         key: _codeViewKey,
@@ -450,6 +480,7 @@ class RepositoryViewState extends State<RepositoryView> {
           onChanged: _loadRepository,
           watchIntervalMinutes: _controller.watcher.intervalMinutes,
           onWatchIntervalChanged: _controller.watcher.setIntervalMinutes,
+          onOpenInTerminal: widget.onOpenInTerminal,
           isUpdatingCurrentBranch: _controller.isPulling,
           onUpdateCurrentBranch: () async {
             final result = await _controller.pull();
