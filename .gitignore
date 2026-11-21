@@ -9,3 +9,4 @@ flutter/.packages
 flutter/build/
 flutter/windows/flutter/ephemeral/
 flutter/*.iml
+/dist/

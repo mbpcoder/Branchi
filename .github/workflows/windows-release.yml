@@ -43,11 +43,16 @@ jobs:
       - name: Package release archive
         run: Compress-Archive -Path flutter\build\windows\x64\runner\Release\* -DestinationPath branchi-windows.zip
 
+      - name: Build installer (Inno Setup)
+        run: |
+          $version = "$env:GITHUB_REF_NAME" -replace '^v',''
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" "/DSourceDir=$env:GITHUB_WORKSPACE\flutter\build\windows\x64\runner\Release" installer\windows\branchi.iss
+
       - name: Create release and upload artifact
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "$env:GITHUB_REF_NAME"
-          gh release create $tag branchi-windows.zip `
+          gh release create $tag branchi-windows.zip dist\branchi-setup.exe `
             --title "Branchi $tag" `
             --generate-notes
