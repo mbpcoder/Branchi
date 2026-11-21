@@ -9,12 +9,20 @@ import '../theme/app_theme.dart';
 import '../widgets/form_row.dart';
 
 /// The "start page" shown as the content of the default tab and every new
-/// tab: a centered 560px column with "Open folder" / "Clone" / "New repo"
-/// and the recent repositories. Cloning happens in a dialog.
+/// tab: a centered 560px column with "Open folder" / "Clone" / "New repo",
+/// "Update all repositories in a folder" and the recent repositories. Cloning happens in a dialog.
 class WelcomeForm extends StatefulWidget {
-  const WelcomeForm({super.key, required this.onRepositoryOpened});
+  const WelcomeForm({
+    super.key,
+    required this.onRepositoryOpened,
+    required this.onUpdateFolderSelected,
+  });
 
   final ValueChanged<String> onRepositoryOpened;
+
+  /// Called with the folder picked for "Update all repositories in a
+  /// folder"; the caller opens it in a new folder tab.
+  final ValueChanged<String> onUpdateFolderSelected;
 
   @override
   State<WelcomeForm> createState() => _WelcomeFormState();
@@ -72,6 +80,12 @@ class _WelcomeFormState extends State<WelcomeForm> {
 
     await RecentRepositoriesStore.addOrPromote(path);
     widget.onRepositoryOpened(path);
+  }
+
+  Future<void> _updateFolder() async {
+    final path = await FilePicker.platform.getDirectoryPath();
+    if (path == null) return;
+    widget.onUpdateFolderSelected(path);
   }
 
   Future<void> _newRepository() async {
@@ -172,6 +186,18 @@ class _WelcomeFormState extends State<WelcomeForm> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _isBusy ? null : _updateFolder,
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(40),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    icon: const Icon(Icons.sync, size: 16),
+                    label: Text(translate('update_folder')),
                   ),
                   const SizedBox(height: 36),
                   Padding(
