@@ -734,6 +734,11 @@ class GitFfi {
     final exeDir = p.dirname(Platform.resolvedExecutable);
     yield p.join(exeDir, 'lib', libName);
     yield p.join(exeDir, libName);
+    // Packaged macOS app: `Branchi.app/Contents/Frameworks/`, next to
+    // `Contents/MacOS/` where the executable lives.
+    if (Platform.isMacOS) {
+      yield p.join(p.dirname(exeDir), 'Frameworks', libName);
+    }
 
     final searchRoots = <String>{
       Directory.current.path,

@@ -89,6 +89,104 @@ jobs:
           git commit -m "Update Scoop manifest to $version" || exit 0
           git push origin HEAD:main
 
+  build-macos:
+    needs: build-windows
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Build universal native library (libbranchi_core.dylib)
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
+        run: |
+          cargo build --release -p branchi-core --target aarch64-apple-darwin
+          cargo build --release -p branchi-core --target x86_64-apple-darwin
+          mkdir -p target/universal
+          lipo -create -output target/universal/libbranchi_core.dylib \
+            target/aarch64-apple-darwin/release/libbranchi_core.dylib \
+            target/x86_64-apple-darwin/release/libbranchi_core.dylib
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      # The app needs to open any folder, run a terminal and reach git
+      # servers, so the App Sandbox (on by default) is turned off.
+      - name: Ensure macOS platform scaffolding exists
+        working-directory: flutter
+        run: |
+          if [ ! -d macos ]; then flutter create --platforms=macos --org com.mbpcoder .; fi
+          sed -i '' 's/^PRODUCT_NAME = .*/PRODUCT_NAME = Branchi/' macos/Runner/Configs/AppInfo.xcconfig
+          for f in macos/Runner/DebugProfile.entitlements macos/Runner/Release.entitlements; do
+            /usr/libexec/PlistBuddy -c "Set :com.apple.security.app-sandbox false" "$f"
+          done
+
+      - name: Generate macOS app icon
+        working-directory: flutter
+        continue-on-error: true
+        run: |
+          flutter pub get
+          cat > /tmp/icons-macos.yaml <<'YAML'
+          flutter_launcher_icons:
+            image_path: "assets/icon/branchi_logo.png"
+            macos:
+              generate: true
+              image_path: "assets/icon/branchi_logo.png"
+          YAML
+          dart run flutter_launcher_icons -f /tmp/icons-macos.yaml
+
+      - name: Build Flutter macOS app
+        working-directory: flutter
+        run: |
+          flutter pub get
+          flutter build macos --release
+
+      # Not signed with a Developer ID yet: re-sign ad hoc after adding the
+      # library, since Apple Silicon refuses to run unsigned code.
+      - name: Bundle native library and build DMG
+        run: |
+          app=flutter/build/macos/Build/Products/Release/Branchi.app
+          mkdir -p "$app/Contents/Frameworks"
+          cp target/universal/libbranchi_core.dylib "$app/Contents/Frameworks/"
+          codesign --force --deep --sign - "$app"
+          mkdir dmg
+          cp -R "$app" dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname Branchi -srcfolder dmg -ov -format UDZO branchi-macos.dmg
+
+      - name: Upload DMG to GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" branchi-macos.dmg --clobber
+
+  # Runs after update-scoop so the two jobs don't race pushing to main.
+  update-cask:
+    needs: [build-macos, update-scoop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Update Homebrew cask
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release download "$TAG" --pattern branchi-macos.dmg --dir /tmp/rel
+          hash=$(sha256sum /tmp/rel/branchi-macos.dmg | cut -d' ' -f1)
+          version="${TAG#v}"
+          sed -i -E "s/^  version \".*\"/  version \"$version\"/; s/^  sha256 .*/  sha256 \"$hash\"/" Casks/branchi.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/branchi.rb
+          git commit -m "Update Homebrew cask to $version" || exit 0
+          git push origin HEAD:main
+
   build-linux-snap:
     needs: build-windows
     runs-on: ubuntu-22.04
