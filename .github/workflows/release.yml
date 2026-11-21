@@ -35,7 +35,9 @@ jobs:
 
       - name: Build Flutter Windows app
         working-directory: flutter
-        run: flutter build windows --release
+        run: |
+          $version = "$env:GITHUB_REF_NAME" -replace '^v',''
+          flutter build windows --release --build-name=$version --dart-define=BRANCHI_VERSION=$version
 
       - name: Bundle native library with the app
         run: Copy-Item target\release\branchi_core.dll flutter\build\windows\x64\runner\Release\branchi_core.dll
@@ -53,7 +55,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "$env:GITHUB_REF_NAME"
-          $files = @("branchi-windows.zip", "dist\branchi-setup.exe")
+          $hash = (Get-FileHash dist\branchi-setup.exe -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path dist\branchi-setup.exe.sha256 -Value "$hash  branchi-setup.exe" -NoNewline
+          $files = @("branchi-windows.zip", "dist\branchi-setup.exe", "dist\branchi-setup.exe.sha256")
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag @files --clobber
