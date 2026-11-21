@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:xterm/xterm.dart';
 
+import '../settings/shell_preferences.dart';
+
 /// A running shell session backing one terminal tab.
 class TerminalSession {
   TerminalSession({
@@ -25,6 +27,8 @@ class TerminalSession {
 
 /// The shell to launch inside the embedded terminal.
 String defaultShell() {
+  final preferred = ShellPreferences.resolvedDefault;
+  if (preferred != null) return preferred.executable;
   if (Platform.isWindows) {
     return Platform.environment['COMSPEC'] ?? 'powershell.exe';
   }
@@ -53,6 +57,10 @@ TerminalSession spawnTerminalSession(
     columns: 80,
     rows: 24,
     workingDirectory: workingDirectory ?? Directory.current.path,
+    // Pass the app's full environment explicitly so the shell gets the
+    // user's PATH, %APPDATA%, %USERPROFILE% etc. — without these, tools
+    // like Node version managers fail to find their config.
+    environment: Platform.environment,
   );
 
   final terminal = Terminal(maxLines: 10000);

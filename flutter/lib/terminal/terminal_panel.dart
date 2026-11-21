@@ -211,7 +211,11 @@ class _TerminalPanelState extends State<TerminalPanel> {
                     ),
                     AnimatedBuilder(
                       animation: Listenable.merge(
-                        [ShellPreferences.detected, ShellPreferences.custom],
+                        [
+                          ShellPreferences.detected,
+                          ShellPreferences.custom,
+                          ShellPreferences.defaultExecutable,
+                        ],
                       ),
                       builder: (context, _) {
                         final shells = ShellPreferences.all;
@@ -220,7 +224,7 @@ class _TerminalPanelState extends State<TerminalPanel> {
                             tooltip: translate('new_tab'),
                             icon: const Icon(Icons.add),
                             onPressed: () =>
-                                onAddTab(shells.isEmpty ? null : shells.first),
+                                onAddTab(ShellPreferences.resolvedDefault),
                           );
                         }
                         return PopupMenuButton<ShellDefinition>(

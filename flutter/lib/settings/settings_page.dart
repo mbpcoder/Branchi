@@ -353,6 +353,15 @@ class _SettingsPageState extends State<SettingsPage> {
           title: translate('terminal'),
           subtitle: translate('shells_description'),
         ),
+        Padding(
+          padding: const EdgeInsets.only(top: 24),
+          child: Row(
+            children: [
+              Expanded(child: Text(translate('default_shell'))),
+              const _DefaultShellDropdown(),
+            ],
+          ),
+        ),
         ValueListenableBuilder<List<ShellDefinition>>(
           valueListenable: ShellPreferences.detected,
           builder: (context, detected, _) {
@@ -741,6 +750,68 @@ class _CalendarDropdown extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Which shell new terminal tabs open with: automatic (PowerShell 7 if
+/// installed) or any detected / custom shell.
+class _DefaultShellDropdown extends StatelessWidget {
+  const _DefaultShellDropdown();
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    return AnimatedBuilder(
+      animation: Listenable.merge([
+        ShellPreferences.detected,
+        ShellPreferences.custom,
+        ShellPreferences.defaultExecutable,
+      ]),
+      builder: (context, _) {
+        final shells = ShellPreferences.all;
+        final executables = {for (final s in shells) s.executable};
+        final picked = ShellPreferences.defaultExecutable.value;
+        final value = executables.contains(picked) ? picked : null;
+        final auto = ShellPreferences.autoDefault;
+        return Container(
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            border: Border.fromBorderSide(b.hairline),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String?>(
+              value: value,
+              isDense: true,
+              focusColor: Colors.transparent,
+              dropdownColor: b.bg,
+              borderRadius: BorderRadius.circular(8),
+              icon: Icon(Icons.keyboard_arrow_down, size: 14, color: b.muted),
+              style: TextStyle(fontSize: 13, color: b.fg),
+              items: [
+                DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text(
+                    auto == null
+                        ? translate('shell_automatic')
+                        : '${translate('shell_automatic')} (${auto.name})',
+                  ),
+                ),
+                for (final exe in executables)
+                  DropdownMenuItem<String?>(
+                    value: exe,
+                    child: Text(
+                      shells.firstWhere((s) => s.executable == exe).name,
+                    ),
+                  ),
+              ],
+              onChanged: ShellPreferences.setDefault,
+            ),
+          ),
+        );
+      },
     );
   }
 }
