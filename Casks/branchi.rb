@@ -1,7 +1,7 @@
 cask "branchi" do
   # version and sha256 are updated by the release workflow.
-  version "0.6.1"
-  sha256 "08844e7405829ba82dd3dafc5f02e4efcb4fc74007d498bac4f53a1a7295d62d"
+  version "0.7.0"
+  sha256 "9473ccad0949775181d39251d5d220b9a7ec75a090f005b2d3c06f8b976c088b"
 
   url "https://github.com/mbpcoder/Branchi/releases/download/v#{version}/branchi-macos.dmg"
   name "Branchi"
