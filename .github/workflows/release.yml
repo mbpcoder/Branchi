@@ -48,14 +48,19 @@ jobs:
           $version = "$env:GITHUB_REF_NAME" -replace '^v',''
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" "/DSourceDir=$env:GITHUB_WORKSPACE\flutter\build\windows\x64\runner\Release" installer\windows\branchi.iss
 
-      - name: Create release and upload artifact
+      - name: Create or update release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "$env:GITHUB_REF_NAME"
-          gh release create $tag branchi-windows.zip dist\branchi-setup.exe `
-            --title "Branchi $tag" `
-            --generate-notes
+          $files = @("branchi-windows.zip", "dist\branchi-setup.exe")
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag @files --clobber
+          } else {
+            gh release create $tag @files --title "Branchi $tag" --generate-notes
+          }
+          exit $LASTEXITCODE
 
   update-scoop:
     needs: build-windows
@@ -128,7 +133,7 @@ jobs:
       - name: Upload snap to GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" "${{ steps.snap.outputs.snap }}"
+        run: gh release upload "$GITHUB_REF_NAME" "${{ steps.snap.outputs.snap }}" --clobber
 
       - uses: snapcore/action-publish@v1
         env:
