@@ -1,18 +1,18 @@
-# Branchi — a free, open-source git client for Windows and Linux
+# Branchi — a free, open-source git client for Windows, macOS and Linux
 
 <p align="center">
   <img src="docs/branchi-demo.gif" width="820" alt="Branchi git client tour: update all repositories in a folder, activity reports, history, changes, editor and settings" />
 </p>
 
-**Branchi** is a free and open-source (MIT) desktop git client for Windows and Linux with a **Rust** core
+**Branchi** is a free and open-source (MIT) desktop git client for Windows, macOS and Linux with a **Rust** core
 and a **Flutter** UI. It covers the everyday work — history, staging,
 committing, branches, pull and push — and adds what most git GUIs leave out:
 **updating every repository in a folder at once**, **activity reports for a
 repository and for each author**, a **built-in terminal**, and full
 **Persian/Arabic (RTL) and Jalali calendar** support.
 
-If you are looking for a **git client for Windows**, a lighter
-**GitHub client for Windows**, or an alternative to Fork, Sourcetree,
+If you are looking for a **git client for Windows or macOS**, a lighter
+**GitHub client for Windows or Mac**, or an alternative to Fork, Sourcetree,
 GitHub Desktop, GitKraken or TortoiseGit, give Branchi a try.
 
 ## Why Branchi
