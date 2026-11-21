@@ -672,6 +672,12 @@ class GitFfi {
 
     yield libName;
 
+    // Packaged Linux bundle (tarball/snap): native libs live in `lib/`
+    // next to the executable. dlopen() won't search there on its own.
+    final exeDir = p.dirname(Platform.resolvedExecutable);
+    yield p.join(exeDir, 'lib', libName);
+    yield p.join(exeDir, libName);
+
     final searchRoots = <String>{
       Directory.current.path,
       p.dirname(Platform.resolvedExecutable),

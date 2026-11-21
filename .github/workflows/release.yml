@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  push:
+    tags: ["*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build native library (branchi_core.dll)
+        run: cargo build --release -p branchi-core
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Ensure Windows platform scaffolding exists
+        working-directory: flutter
+        run: |
+          if (-not (Test-Path "windows")) {
+            flutter create --platforms=windows .
+          }
+
+      - name: Install Flutter dependencies
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Build Flutter Windows app
+        working-directory: flutter
+        run: flutter build windows --release
+
+      - name: Bundle native library with the app
+        run: Copy-Item target\release\branchi_core.dll flutter\build\windows\x64\runner\Release\branchi_core.dll
+
+      - name: Package release archive
+        run: Compress-Archive -Path flutter\build\windows\x64\runner\Release\* -DestinationPath branchi-windows.zip
+
+      - name: Build installer (Inno Setup)
+        run: |
+          $version = "$env:GITHUB_REF_NAME" -replace '^v',''
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" "/DSourceDir=$env:GITHUB_WORKSPACE\flutter\build\windows\x64\runner\Release" installer\windows\branchi.iss
+
+      - name: Create release and upload artifact
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "$env:GITHUB_REF_NAME"
+          gh release create $tag branchi-windows.zip dist\branchi-setup.exe `
+            --title "Branchi $tag" `
+            --generate-notes
+
+  update-scoop:
+    needs: build-windows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Update Scoop manifest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release download "$TAG" --pattern branchi-windows.zip --dir /tmp/rel
+          hash=$(sha256sum /tmp/rel/branchi-windows.zip | cut -d' ' -f1)
+          version="${TAG#v}"
+          url="https://github.com/${{ github.repository }}/releases/download/$TAG/branchi-windows.zip"
+          jq --arg v "$version" --arg u "$url" --arg h "$hash" \
+            '.version=$v | .architecture."64bit".url=$u | .architecture."64bit".hash=$h' \
+            bucket/branchi.json > /tmp/branchi.json
+          mv /tmp/branchi.json bucket/branchi.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/branchi.json
+          git commit -m "Update Scoop manifest to $version" || exit 0
+          git push origin HEAD:main
+
+  build-linux-snap:
+    needs: build-windows
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libssl-dev
+
+      - name: Build native library (libbranchi_core.so)
+        run: cargo build --release -p branchi-core
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Ensure Linux platform scaffolding exists
+        working-directory: flutter
+        run: |
+          if [ ! -d linux ]; then flutter create --platforms=linux .; fi
+
+      - name: Build Flutter Linux app
+        working-directory: flutter
+        run: |
+          flutter pub get
+          flutter build linux --release
+
+      - name: Bundle native library with the app
+        run: cp target/release/libbranchi_core.so flutter/build/linux/x64/release/bundle/lib/
+
+      - name: Set snap version from tag
+        run: |
+          sed -i "s/^version: .*/version: '${GITHUB_REF_NAME#v}'/" snap/snapcraft.yaml
+
+      - uses: snapcore/action-build@v1
+        id: snap
+
+      - name: Upload snap to GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" "${{ steps.snap.outputs.snap }}"
+
+      - uses: snapcore/action-publish@v1
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: ${{ steps.snap.outputs.snap }}
+          release: stable
