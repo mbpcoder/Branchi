@@ -7,5 +7,5 @@ Pending tasks that are blocked on something outside the code.
   - Once confirmed, post `docs/snap-classic-request.md` in the "store-requests"
     category at https://forum.snapcraft.io.
   - Until approved, snap uploads from CI are held for manual review.
-- [ ] Add the `SNAPCRAFT_STORE_CREDENTIALS` GitHub Actions secret (if not done yet).
+- [x] Add the `SNAPCRAFT_STORE_CREDENTIALS` GitHub Actions secret.
 - [ ] Merge `claude/amazing-lovelace-rpkkxu` into `main`, then push a `v0.1.0` tag to run the release.
