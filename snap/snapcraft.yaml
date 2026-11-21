@@ -2,6 +2,7 @@ name: branchi
 base: core22
 version: '0.0.0' # overwritten by CI from the git tag
 summary: A git client with a Rust core and a Flutter UI
+license: MIT
 description: |
   Branchi is a desktop git client built with a Rust core (libgit2)
   and a Flutter user interface.

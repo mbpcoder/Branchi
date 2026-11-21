@@ -1,6 +1,6 @@
-# Branchi — a fast git client for Windows and Linux
+# Branchi — a free, open-source git client for Windows and Linux
 
-**Branchi** is a desktop git client for Windows and Linux with a **Rust** core
+**Branchi** is a free and open-source (MIT) desktop git client for Windows and Linux with a **Rust** core
 and a **Flutter** UI. It covers the everyday work — history, staging,
 committing, branches, pull and push — and adds what most git GUIs leave out:
 **updating every repository in a folder at once**, **activity reports for a
@@ -289,3 +289,7 @@ branchi/
     ├── pubspec.yaml
     └── lib/             # screens, report, terminal, settings, …
 ```
+
+## License
+
+Branchi is released under the [MIT License](LICENSE).
