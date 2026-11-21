@@ -500,6 +500,8 @@ class _TabStrip extends StatelessWidget {
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () => onSelect(index),
+            // Middle-click closes the tab, as in browsers.
+            onTertiaryTapUp: (_) => onClose(index),
             child: Container(
               padding: const EdgeInsetsDirectional.only(start: 16, end: 10),
               decoration: BoxDecoration(
