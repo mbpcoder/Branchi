@@ -1,0 +1,44 @@
+name: Tests
+
+# Runs on every branch push; builds and releases stay in release.yml,
+# which runs only when a tag is pushed.
+on:
+  push:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run core tests
+        run: cargo test -p branchi-core
+
+  flutter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Tests that reach git go through the native library.
+      - name: Build native library
+        run: cargo build -p branchi-core
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install Flutter dependencies
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Run Flutter tests
+        working-directory: flutter
+        run: flutter test

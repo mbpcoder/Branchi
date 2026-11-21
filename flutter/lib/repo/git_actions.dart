@@ -247,13 +247,21 @@ class GitActions {
     final ffi = GitFfi.instanceOrNull;
     if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
 
-    final error = await Isolate.run(
-      () => ffi.updateBranch(path, name, isRemote: isRemote),
-    );
+    // A local branch's counts are what the fast-forward brought in.
+    final (error, stats) = await Isolate.run(() {
+      final ref = 'refs/heads/$name';
+      final before = isRemote ? null : _tryResolve(ffi, path, ref);
+      final error = ffi.updateBranch(path, name, isRemote: isRemote);
+      final stats = error == null && before != null
+          ? _tryStats(ffi, path, before, ref)
+          : null;
+      return (error, stats);
+    });
     ActionLog.instance.record(
       'update ${isRemote ? 'remote ' : ''}branch $name',
       success: error == null,
       detail: error,
+      stats: stats,
     );
     return error == null
         ? const GitActionResult.success()
@@ -371,8 +379,13 @@ class GitActions {
     if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
 
     String? error;
+    ActionStats? stats;
     try {
-      await Isolate.run(() => ffi.commit(path, message));
+      stats = await Isolate.run(() {
+        final before = _tryResolve(ffi, path, 'HEAD');
+        ffi.commit(path, message);
+        return _tryStats(ffi, path, before, 'HEAD', withCommits: false);
+      });
     } on GitFfiException catch (e) {
       error = e.message;
     } catch (e) {
@@ -382,6 +395,7 @@ class GitActions {
       'commit',
       success: error == null,
       detail: error,
+      stats: stats,
     );
     return error == null
         ? const GitActionResult.success()
@@ -393,15 +407,48 @@ class GitActions {
     final ffi = GitFfi.instanceOrNull;
     if (ffi == null) return const GitActionResult.failure(_missingLibraryError);
 
-    final error = await Isolate.run(() => ffi.push(path, name));
+    // Counted before pushing: what the upstream doesn't have yet.
+    final (error, stats) = await Isolate.run(() {
+      final stats = _tryStats(ffi, path, '$name@{upstream}', 'refs/heads/$name');
+      return (ffi.push(path, name), stats);
+    });
     ActionLog.instance.record(
       'push $name',
       success: error == null,
       detail: error,
+      stats: stats,
     );
     return error == null
         ? const GitActionResult.success()
         : GitActionResult.failure(error);
+  }
+
+  /// [rev]'s commit id, or null if it doesn't resolve or can't be read.
+  static String? _tryResolve(GitFfi ffi, String path, String rev) {
+    try {
+      return ffi.resolveCommit(path, rev);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Activity-panel counts for [from]..[to]; null if they can't be worked
+  /// out, so a failure here never fails the action itself.
+  static ActionStats? _tryStats(
+    GitFfi ffi,
+    String path,
+    String? from,
+    String to, {
+    bool withCommits = true,
+  }) {
+    try {
+      return ActionStats.fromJson(
+        ffi.changeStats(path, from, to),
+        withCommits: withCommits,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   /// This repository's configured remotes.

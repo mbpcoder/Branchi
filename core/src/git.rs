@@ -147,6 +147,16 @@ pub struct BranchReport {
     pub branches: Vec<BranchStat>,
 }
 
+/// What a range of commits changed: shown next to commit, pull and push
+/// entries in the Activity panel.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct ChangeStats {
+    pub commits: usize,
+    pub files: usize,
+    pub insertions: usize,
+    pub deletions: usize,
+}
+
 impl GitRepo {
     /// Open an existing repository at `path`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -710,6 +720,68 @@ impl GitRepo {
         git2::Cred::default()
     }
 
+    /// The commit id `rev` resolves to, or `None` if it doesn't resolve
+    /// (e.g. an unborn HEAD or a branch without an upstream).
+    pub fn resolve_commit(&self, rev: &str) -> Option<String> {
+        self.repo
+            .revparse_single(rev)
+            .and_then(|obj| obj.peel_to_commit())
+            .ok()
+            .map(|commit| commit.id().to_string())
+    }
+
+    /// What `to` adds on top of `from`: the commits reachable from `to`
+    /// but not `from`, and the files and lines changed between their merge
+    /// base and `to`. With no `from`, everything reachable from `to`
+    /// counts (diffed against the empty tree).
+    pub fn change_stats(&self, from: Option<&str>, to: &str) -> Result<ChangeStats> {
+        let to_commit = self
+            .repo
+            .revparse_single(to)
+            .and_then(|obj| obj.peel_to_commit())
+            .with_context(|| format!("cannot resolve: {to}"))?;
+        let from_commit = match from {
+            Some(rev) => Some(
+                self.repo
+                    .revparse_single(rev)
+                    .and_then(|obj| obj.peel_to_commit())
+                    .with_context(|| format!("cannot resolve: {rev}"))?,
+            ),
+            None => None,
+        };
+
+        let mut walk = self.repo.revwalk()?;
+        walk.push(to_commit.id())?;
+        if let Some(from_commit) = &from_commit {
+            walk.hide(from_commit.id())?;
+        }
+        let commits = walk.count();
+        if commits == 0 {
+            return Ok(ChangeStats::default());
+        }
+
+        let base_tree = match &from_commit {
+            Some(from_commit) => {
+                let base = self
+                    .repo
+                    .merge_base(from_commit.id(), to_commit.id())
+                    .unwrap_or(from_commit.id());
+                Some(self.repo.find_commit(base)?.tree()?)
+            }
+            None => None,
+        };
+        let diff =
+            self.repo
+                .diff_tree_to_tree(base_tree.as_ref(), Some(&to_commit.tree()?), None)?;
+        let stats = diff.stats()?;
+        Ok(ChangeStats {
+            commits,
+            files: stats.files_changed(),
+            insertions: stats.insertions(),
+            deletions: stats.deletions(),
+        })
+    }
+
     /// Commit the current index with the given message, using `name`/`email`
     /// as both author and committer. Returns the new commit's id.
     pub fn commit(&self, message: &str, name: &str, email: &str) -> Result<String> {
@@ -1153,6 +1225,64 @@ mod tests {
         let status = repo.status().unwrap();
         assert_eq!(status[0].staged, None);
         assert_eq!(status[0].unstaged, Some(FileStatus::Modified));
+    }
+
+    #[test]
+    fn change_stats_counts_commits_files_and_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        write_file(dir.path(), "a.txt", "one\ntwo\n");
+        repo.stage("a.txt").unwrap();
+        let first = repo
+            .commit("init", "Test User", "test@example.com")
+            .unwrap();
+
+        let stats = repo.change_stats(None, &first).unwrap();
+        assert_eq!(
+            stats,
+            ChangeStats {
+                commits: 1,
+                files: 1,
+                insertions: 2,
+                deletions: 0
+            }
+        );
+
+        write_file(dir.path(), "a.txt", "one\nthree\n");
+        write_file(dir.path(), "b.txt", "new\n");
+        repo.stage("a.txt").unwrap();
+        repo.stage("b.txt").unwrap();
+        repo.commit("second", "Test User", "test@example.com")
+            .unwrap();
+        write_file(dir.path(), "c.txt", "c\n");
+        repo.stage("c.txt").unwrap();
+        let third = repo
+            .commit("third", "Test User", "test@example.com")
+            .unwrap();
+
+        let stats = repo.change_stats(Some(&first), "HEAD").unwrap();
+        assert_eq!(
+            stats,
+            ChangeStats {
+                commits: 2,
+                files: 3,
+                insertions: 3,
+                deletions: 1
+            }
+        );
+        assert_eq!(repo.resolve_commit("HEAD"), Some(third.clone()));
+        assert_eq!(
+            repo.change_stats(Some(&third), &third).unwrap(),
+            ChangeStats::default()
+        );
+    }
+
+    #[test]
+    fn resolve_commit_on_unborn_head_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        assert_eq!(repo.resolve_commit("HEAD"), None);
     }
 
     #[test]

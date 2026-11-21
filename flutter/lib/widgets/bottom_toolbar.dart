@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_locale.dart';
 import '../logs/action_log.dart';
+import '../logs/action_stats_label.dart';
 import '../theme/app_theme.dart';
 
 /// The 32px footer: the most recent git action (status dot, action, time)
-/// on the left; the active file's type and the Activity (logs) and
+/// on the left, with its change counts, opening the Activity panel when
+/// clicked; the active file's type and the Activity (logs) and
 /// Terminal toggles on the right.
 class BottomToolbar extends StatelessWidget {
   const BottomToolbar({
@@ -54,27 +56,49 @@ class BottomToolbar extends StatelessWidget {
                     return Text(translate('ready'), style: textStyle);
                   }
                   final last = entries.first;
-                  return Tooltip(
-                    message: last.detail ?? last.action,
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 6,
-                          height: 6,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: last.success ? b.add : b.del,
+                  return Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Tooltip(
+                      message: last.detail ?? last.action,
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: isLogsOpen ? null : onToggleLogs,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: last.success ? b.add : b.del,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  last.action,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: textStyle,
+                                ),
+                              ),
+                              if (last.stats != null) ...[
+                                const SizedBox(width: 8),
+                                ActionStatsLabel(
+                                  stats: last.stats!,
+                                  compact: true,
+                                ),
+                              ],
+                              Text(
+                                ' · ${_time(last.timestamp)}',
+                                style: textStyle,
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            '${last.action} · ${_time(last.timestamp)}',
-                            overflow: TextOverflow.ellipsis,
-                            style: textStyle,
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   );
                 },

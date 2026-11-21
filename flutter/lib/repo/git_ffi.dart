@@ -166,6 +166,26 @@ typedef _PushDart = Pointer<Utf8> Function(
   Pointer<Utf8> name,
 );
 
+typedef _ResolveCommitNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> rev,
+);
+typedef _ResolveCommitDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> rev,
+);
+
+typedef _ChangeStatsNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> from,
+  Pointer<Utf8> to,
+);
+typedef _ChangeStatsDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> from,
+  Pointer<Utf8> to,
+);
+
 typedef _RemotesNative = Pointer<Utf8> Function(Pointer<Utf8> path);
 typedef _RemotesDart = Pointer<Utf8> Function(Pointer<Utf8> path);
 
@@ -280,6 +300,14 @@ class GitFfi {
         _commit =
             lib.lookupFunction<_CommitNative, _CommitDart>('branchi_commit'),
         _push = lib.lookupFunction<_PushNative, _PushDart>('branchi_push'),
+        _resolveCommit =
+            lib.lookupFunction<_ResolveCommitNative, _ResolveCommitDart>(
+          'branchi_resolve_commit',
+        ),
+        _changeStats =
+            lib.lookupFunction<_ChangeStatsNative, _ChangeStatsDart>(
+          'branchi_change_stats',
+        ),
         _remotes = lib.lookupFunction<_RemotesNative, _RemotesDart>(
           'branchi_remotes',
         ),
@@ -340,6 +368,8 @@ class GitFfi {
   final _WorkingDiffDart _workingDiff;
   final _CommitDart _commit;
   final _PushDart _push;
+  final _ResolveCommitDart _resolveCommit;
+  final _ChangeStatsDart _changeStats;
   final _RemotesDart _remotes;
   final _AddRemoteDart _addRemote;
   final _SetRemoteUrlDart _setRemoteUrl;
@@ -603,6 +633,42 @@ class GitFfi {
     } finally {
       malloc.free(pathPtr);
       malloc.free(namePtr);
+    }
+  }
+
+  /// The commit id [rev] resolves to, or null if it doesn't resolve.
+  /// Throws a [GitFfiException] if the repository can't be opened.
+  String? resolveCommit(String path, String rev) {
+    final pathPtr = path.toNativeUtf8();
+    final revPtr = rev.toNativeUtf8();
+    try {
+      final resultPtr = _resolveCommit(pathPtr, revPtr);
+      final text = resultPtr.toDartString();
+      _freeString(resultPtr);
+      final decoded = jsonDecode(text) as Map<String, dynamic>;
+      if (decoded.containsKey('error')) {
+        throw GitFfiException(decoded['error'] as String);
+      }
+      return decoded['ok'] as String?;
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(revPtr);
+    }
+  }
+
+  /// What [to] adds on top of [from] (everything reachable from [to] when
+  /// [from] is null): `commits`, `files`, `insertions`, `deletions`.
+  /// Throws a [GitFfiException] on failure.
+  Map<String, dynamic> changeStats(String path, String? from, String to) {
+    final pathPtr = path.toNativeUtf8();
+    final fromPtr = from == null ? nullptr : from.toNativeUtf8();
+    final toPtr = to.toNativeUtf8();
+    try {
+      return _consumeJsonMap(_changeStats(pathPtr, fromPtr, toPtr));
+    } finally {
+      malloc.free(pathPtr);
+      if (fromPtr != nullptr) malloc.free(fromPtr);
+      malloc.free(toPtr);
     }
   }
 

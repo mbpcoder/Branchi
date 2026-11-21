@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_locale.dart';
 import 'action_log.dart';
+import 'action_stats_label.dart';
 
 /// Minimum and maximum drag-resize height for the logs/terminal panels.
 const double kPanelMinHeight = 80;
@@ -92,7 +93,20 @@ class LogsPanel extends StatelessWidget {
                         color:
                             entry.success ? colorScheme.primary : colorScheme.error,
                       ),
-                      title: Text(entry.action),
+                      title: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              entry.action,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (entry.stats != null) ...[
+                            const SizedBox(width: 10),
+                            ActionStatsLabel(stats: entry.stats!),
+                          ],
+                        ],
+                      ),
                       subtitle: entry.success ? null : Text(entry.detail ?? ''),
                       trailing: Text(_formatTimestamp(entry.timestamp)),
                     );
