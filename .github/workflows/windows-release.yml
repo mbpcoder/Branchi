@@ -47,7 +47,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $tag = "windows-build-$($env:GITHUB_RUN_NUMBER)"
+          $tag = "$env:GITHUB_REF_NAME"
           gh release create $tag branchi-windows.zip `
-            --title "Branchi Windows build $($env:GITHUB_RUN_NUMBER)" `
+            --title "Branchi $tag" `
             --generate-notes
