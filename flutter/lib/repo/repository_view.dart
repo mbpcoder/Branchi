@@ -29,6 +29,7 @@ class RepositoryView extends StatefulWidget {
     required this.path,
     required this.controller,
     this.onLanguageChanged,
+    this.onOpenInTerminal,
   });
 
   final String path;
@@ -40,6 +41,9 @@ class RepositoryView extends StatefulWidget {
   /// Forwarded to the Code tab so the app's bottom bar can show the active
   /// file's detected type.
   final ValueChanged<String?>? onLanguageChanged;
+
+  /// Opens a new built-in terminal tab in the repository folder.
+  final VoidCallback? onOpenInTerminal;
 
   @override
   State<RepositoryView> createState() => RepositoryViewState();
@@ -450,6 +454,7 @@ class RepositoryViewState extends State<RepositoryView> {
           onChanged: _loadRepository,
           watchIntervalMinutes: _controller.watcher.intervalMinutes,
           onWatchIntervalChanged: _controller.watcher.setIntervalMinutes,
+          onOpenInTerminal: widget.onOpenInTerminal,
           isUpdatingCurrentBranch: _controller.isPulling,
           onUpdateCurrentBranch: () async {
             final result = await _controller.pull();

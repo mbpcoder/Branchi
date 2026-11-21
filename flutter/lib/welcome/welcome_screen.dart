@@ -134,6 +134,16 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     _saveState();
   }
 
+  /// Opens the terminal panel with a fresh terminal tab in the active
+  /// tab's repository folder.
+  Future<void> _openNewTerminal() async {
+    final tab = _tabs[_activeTabIndex];
+    await _addTerminalTab();
+    if (!mounted) return;
+    setState(() => tab.isTerminalOpen = true);
+    _saveState();
+  }
+
   void _toggleLogs() {
     final tab = _tabs[_activeTabIndex];
     setState(() => tab.isLogsOpen = !tab.isLogsOpen);
@@ -306,6 +316,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                         controller: tab.controller!,
                         onLanguageChanged: (label) =>
                             setState(() => tab.fileTypeLabel = label),
+                        onOpenInTerminal: _openNewTerminal,
                       )
                     : WelcomeForm(
                         key: ValueKey(tab.id),
