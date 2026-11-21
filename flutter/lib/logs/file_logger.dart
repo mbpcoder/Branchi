@@ -15,14 +15,22 @@ class FileLogger {
 
   static Directory? _logsDir;
 
-  /// Resolves the `logs/` directory next to the running executable and
+  /// Resolves the `logs/` directory next to the running executable
+  /// (`~/Library/Logs/Branchi` on macOS, where the app bundle must stay
+  /// unmodified) and
   /// prunes entries older than [_retentionDays]. Safe to call once at
   /// startup; a no-op on web.
   static Future<void> init() async {
     if (kIsWeb) return;
     try {
-      final exeDir = File(Platform.resolvedExecutable).parent;
-      final dir = Directory('${exeDir.path}${Platform.pathSeparator}logs');
+      final home = Platform.environment['HOME'];
+      final Directory dir;
+      if (Platform.isMacOS && home != null) {
+        dir = Directory('$home/Library/Logs/Branchi');
+      } else {
+        final exeDir = File(Platform.resolvedExecutable).parent;
+        dir = Directory('${exeDir.path}${Platform.pathSeparator}logs');
+      }
       await dir.create(recursive: true);
       _logsDir = dir;
       await _pruneOldLogs(dir);

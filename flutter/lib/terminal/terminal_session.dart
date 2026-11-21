@@ -28,8 +28,14 @@ String defaultShell() {
   if (Platform.isWindows) {
     return Platform.environment['COMSPEC'] ?? 'powershell.exe';
   }
+  if (Platform.isMacOS) return Platform.environment['SHELL'] ?? '/bin/zsh';
   return Platform.environment['SHELL'] ?? '/bin/bash';
 }
+
+/// Apps started from Finder/the Dock get a minimal PATH (no Homebrew etc.),
+/// so on macOS start a login shell, like Terminal.app does, to load the
+/// user's profile.
+List<String> _shellArguments() => Platform.isMacOS ? const ['-l'] : const [];
 
 /// Spawns a real shell in a pseudo-terminal and wires it up to an in-app
 /// [Terminal], so the terminal panel runs inside the app itself rather than
@@ -43,6 +49,7 @@ TerminalSession spawnTerminalSession(
 }) {
   final pty = Pty.start(
     shellExecutable ?? defaultShell(),
+    arguments: _shellArguments(),
     columns: 80,
     rows: 24,
     workingDirectory: workingDirectory ?? Directory.current.path,

@@ -1,5 +1,9 @@
 # Branchi — a free, open-source git client for Windows and Linux
 
+<p align="center">
+  <img src="docs/branchi-demo.gif" width="820" alt="Branchi git client tour: update all repositories in a folder, activity reports, history, changes, editor and settings" />
+</p>
+
 **Branchi** is a free and open-source (MIT) desktop git client for Windows and Linux with a **Rust** core
 and a **Flutter** UI. It covers the everyday work — history, staging,
 committing, branches, pull and push — and adds what most git GUIs leave out:
@@ -10,10 +14,6 @@ repository and for each author**, a **built-in terminal**, and full
 If you are looking for a **git client for Windows**, a lighter
 **GitHub client for Windows**, or an alternative to Fork, Sourcetree,
 GitHub Desktop, GitKraken or TortoiseGit, give Branchi a try.
-
-<p align="center">
-  <img src="docs/screenshots/report.png" width="820" alt="Branchi git client for Windows: repository activity report" />
-</p>
 
 ## Why Branchi
 
@@ -89,6 +89,19 @@ scoop install branchi
 ```bash
 sudo snap install branchi --classic
 ```
+
+**macOS (Homebrew):**
+```bash
+brew tap mbpcoder/branchi https://github.com/mbpcoder/Branchi
+brew install --cask branchi
+```
+Branchi isn't signed with an Apple Developer ID yet, so allow the first
+launch with:
+```bash
+xattr -dr com.apple.quarantine /Applications/Branchi.app
+```
+Or download `branchi-macos.dmg` from the
+[latest release](https://github.com/mbpcoder/Branchi/releases/latest).
 
 To build it yourself, see [Building from source](#building-from-source).
 
