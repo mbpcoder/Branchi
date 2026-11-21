@@ -17,6 +17,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_top_bar.dart';
 import '../widgets/bottom_toolbar.dart';
 import '../widgets/tab_bar_row.dart';
+import '../update/update_banner.dart';
 import 'folder_update_view.dart';
 import 'welcome_form.dart';
 
@@ -362,6 +363,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 onClose: _closeTab,
                 onAddTab: _addTab,
               ),
+              const UpdateBanner(),
               Expanded(
                 child: tab.path != null && tab.controller != null
                     ? RepositoryView(

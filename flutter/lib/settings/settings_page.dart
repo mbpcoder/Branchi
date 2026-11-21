@@ -13,6 +13,7 @@ import 'open_repo_lookup.dart';
 import 'settings_route.dart';
 import 'settings_widgets.dart';
 import 'shell_preferences.dart';
+import '../update/update_settings_section.dart';
 
 /// The sections listed in the settings page's left navigation, with the
 /// ids accepted by [SettingsPage.initialSection].
@@ -21,6 +22,7 @@ enum SettingsSection {
   gitIdentity('git_identity', 'settings_git_identity'),
   terminal('terminal', 'terminal'),
   branchWatcher(kSettingsSectionBranchWatcher, 'branch_watcher'),
+  updates('updates', 'updates'),
   logs('logs', 'logs');
 
   const SettingsSection(this.id, this.labelKey);
@@ -274,6 +276,7 @@ class _SettingsPageState extends State<SettingsPage> {
       SettingsSection.gitIdentity => _gitIdentity(),
       SettingsSection.terminal => _terminal(),
       SettingsSection.branchWatcher => BranchWatcherSection(controller: _repo),
+      SettingsSection.updates => const UpdateSettingsSection(),
       SettingsSection.logs => const _LogsSection(),
     };
   }

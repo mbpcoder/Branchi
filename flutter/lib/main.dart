@@ -10,6 +10,7 @@ import 'l10n/app_locale.dart';
 import 'logs/file_logger.dart';
 import 'settings/shell_preferences.dart';
 import 'theme/app_theme.dart';
+import 'update/update_service.dart';
 
 export 'app.dart';
 
@@ -40,7 +41,9 @@ Future<void> main() async {
     await AppCalendarSettings.load();
     await AppTheme.load();
     await ShellPreferences.load();
+    await UpdateService.load();
     runApp(const BranchiApp());
+    unawaited(UpdateService.checkOnStartup());
   }, (error, stack) {
     FileLogger.log('Uncaught zone error: $error', stackTrace: stack);
   });
