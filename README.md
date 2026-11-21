@@ -11,8 +11,8 @@ committing, branches, pull and push — and adds what most git GUIs leave out:
 repository and for each author**, a **built-in terminal**, and full
 **Persian/Arabic (RTL) and Jalali calendar** support.
 
-If you are looking for a **git client for Windows**, a lighter
-**GitHub client for Windows**, or an alternative to Fork, Sourcetree,
+If you are looking for a **git client for Windows or macOS**, a lighter
+**GitHub client for Windows or Mac**, or an alternative to Fork, Sourcetree,
 GitHub Desktop, GitKraken or TortoiseGit, give Branchi a try.
 
 ## Why Branchi
