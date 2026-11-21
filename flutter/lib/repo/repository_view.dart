@@ -468,6 +468,8 @@ class RepositoryViewState extends State<RepositoryView> {
         onCommitAndPush: _commitAndPush,
         onOpenFile: (entry) => _openFileInEditor(entry.path),
         onRefresh: () => unawaited(_loadStatus()),
+        loadDiff: (entry, {required staged}) =>
+            GitActions.workingDiff(widget.path, entry.path, staged: staged),
       );
     }
     return Row(

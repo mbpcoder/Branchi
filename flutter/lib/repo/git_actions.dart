@@ -161,6 +161,21 @@ class GitActions {
         .toList();
   }
 
+  /// Unified-diff patch of the uncommitted changes to [filePath]: staged
+  /// (index vs HEAD) or unstaged (working tree vs index).
+  static Future<String> workingDiff(
+    String path,
+    String filePath, {
+    required bool staged,
+  }) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) throw StateError(_missingLibraryErrorWithPaths());
+
+    return Isolate.run(
+      () => ffi.workingDiff(path, filePath, staged: staged),
+    );
+  }
+
   /// Checks out local branch [name].
   static Future<GitActionResult> checkoutBranch(String path, String name) async {
     final ffi = GitFfi.instanceOrNull;
