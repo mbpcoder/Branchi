@@ -19,7 +19,7 @@ import '../widgets/tab_bar_row.dart';
 import 'welcome_form.dart';
 
 /// The app's main window: the top bar (with repo switcher, section tabs and
-/// remote actions), a slim tab strip while several tabs are open, the
+/// remote actions), the tab strip (always visible), the
 /// active tab's content (start page or an opened repository), the terminal
 /// and logs panels, and the footer.
 class WelcomeScreen extends StatefulWidget {
@@ -291,14 +291,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 isPinned: _isPinned,
                 onTogglePin: _togglePin,
               ),
-              if (_tabs.length > 1)
-                TabBarRow(
-                  tabs: _tabs,
-                  activeIndex: _activeTabIndex,
-                  onSelect: _selectTab,
-                  onClose: _closeTab,
-                  onAddTab: _addTab,
-                ),
+              TabBarRow(
+                tabs: _tabs,
+                activeIndex: _activeTabIndex,
+                onSelect: _selectTab,
+                onClose: _closeTab,
+                onAddTab: _addTab,
+              ),
               Expanded(
                 child: tab.path != null && tab.controller != null
                     ? RepositoryView(
