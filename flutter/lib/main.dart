@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
+import 'l10n/app_calendar.dart';
 import 'l10n/app_locale.dart';
 import 'logs/file_logger.dart';
 import 'settings/shell_preferences.dart';
@@ -36,6 +37,7 @@ Future<void> main() async {
       await windowManager.ensureInitialized();
     }
     await AppLocale.load();
+    await AppCalendarSettings.load();
     await AppTheme.load();
     await ShellPreferences.load();
     runApp(const BranchiApp());

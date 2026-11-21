@@ -352,6 +352,8 @@ class _SectionTabs extends StatelessWidget {
           ),
           const SizedBox(width: 4),
           segment(RepoSection.files, translate('files')),
+          const SizedBox(width: 4),
+          segment(RepoSection.report, translate('report')),
         ],
       ),
     );

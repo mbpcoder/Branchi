@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_calendar.dart';
 import '../l10n/app_locale.dart';
 import '../l10n/translations.dart';
 import '../logs/action_log.dart';
@@ -546,6 +547,15 @@ class _AppearanceSection extends StatelessWidget {
                 ],
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Row(
+                children: [
+                  Expanded(child: Text(translate('calendar'))),
+                  const _CalendarDropdown(),
+                ],
+              ),
+            ),
           ],
         ),
       ],
@@ -686,6 +696,49 @@ class _LanguageDropdown extends StatelessWidget {
           onChanged: (code) {
             if (code != null) AppLocale.set(code);
           },
+        ),
+      ),
+    );
+  }
+}
+
+/// Calendar dates are shown in: automatic (by language), Gregorian or
+/// Jalali.
+class _CalendarDropdown extends StatelessWidget {
+  const _CalendarDropdown();
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    return ValueListenableBuilder<CalendarPreference>(
+      valueListenable: AppCalendarSettings.preference,
+      builder: (context, value, _) => Container(
+        height: 32,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          border: Border.fromBorderSide(b.hairline),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<CalendarPreference>(
+            value: value,
+            isDense: true,
+            focusColor: Colors.transparent,
+            dropdownColor: b.bg,
+            borderRadius: BorderRadius.circular(8),
+            icon: Icon(Icons.keyboard_arrow_down, size: 14, color: b.muted),
+            style: TextStyle(fontSize: 13, color: b.fg),
+            items: [
+              for (final pref in CalendarPreference.values)
+                DropdownMenuItem(
+                  value: pref,
+                  child: Text(translate('calendar_${pref.name}')),
+                ),
+            ],
+            onChanged: (pref) {
+              if (pref != null) AppCalendarSettings.set(pref);
+            },
+          ),
         ),
       ),
     );
