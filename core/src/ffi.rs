@@ -161,6 +161,47 @@ pub unsafe extern "C" fn branchi_commit_stats(
     result_to_json_c_string(result)
 }
 
+/// Returns the commit id `rev` resolves to as a JSON string:
+/// `{"ok": "<id>"}`, or `{"ok": null}` if it doesn't resolve.
+///
+/// # Safety
+/// `path` and `rev` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_resolve_commit(
+    path: *const c_char,
+    rev: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let rev = c_str_to_string(rev);
+    let result = GitRepo::open(&path).map(|repo| repo.resolve_commit(&rev));
+    result_to_json_c_string(result)
+}
+
+/// Returns what `to` adds on top of `from` (see `GitRepo::change_stats`)
+/// as a JSON string: `{"ok": ChangeStats}` or `{"error": "..."}`. A null
+/// `from` counts everything reachable from `to`.
+///
+/// # Safety
+/// `path` and `to` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call; `from` must be null or such a string.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_change_stats(
+    path: *const c_char,
+    from: *const c_char,
+    to: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let from = if from.is_null() {
+        None
+    } else {
+        Some(c_str_to_string(from))
+    };
+    let to = c_str_to_string(to);
+    let result = GitRepo::open(&path).and_then(|repo| repo.change_stats(from.as_deref(), &to));
+    result_to_json_c_string(result)
+}
+
 /// Returns every local branch compared with the base branch as a JSON
 /// string: `{"ok": BranchReport}` or `{"error": "..."}`.
 ///
