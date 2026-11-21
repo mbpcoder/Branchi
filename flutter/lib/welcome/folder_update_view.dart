@@ -16,6 +16,7 @@ class FolderUpdateView extends StatefulWidget {
     required this.controller,
     required this.onOpenRepository,
     required this.onChangeFolder,
+    required this.isRepositoryOpen,
   });
 
   final FolderUpdateController controller;
@@ -25,6 +26,10 @@ class FolderUpdateView extends StatefulWidget {
 
   /// Points this tab at another folder.
   final ValueChanged<String> onChangeFolder;
+
+  /// Whether the repository at the given path is already open in a tab;
+  /// its row's Open button then reads "Go to tab".
+  final bool Function(String path) isRepositoryOpen;
 
   @override
   State<FolderUpdateView> createState() => _FolderUpdateViewState();
@@ -249,6 +254,7 @@ class _FolderUpdateViewState extends State<FolderUpdateView> {
                   _RepoTable(
                     repos: visible,
                     onOpenRepository: widget.onOpenRepository,
+                    isRepositoryOpen: widget.isRepositoryOpen,
                   ),
               ],
               const SizedBox(height: 12),
@@ -365,10 +371,15 @@ class _FilterBar extends StatelessWidget {
 }
 
 class _RepoTable extends StatelessWidget {
-  const _RepoTable({required this.repos, required this.onOpenRepository});
+  const _RepoTable({
+    required this.repos,
+    required this.onOpenRepository,
+    required this.isRepositoryOpen,
+  });
 
   final List<FolderRepo> repos;
   final ValueChanged<String> onOpenRepository;
+  final bool Function(String path) isRepositoryOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -455,15 +466,27 @@ class _RepoTable extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: () => onOpenRepository(repo.path),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 30),
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                  if (isRepositoryOpen(repo.path))
+                    // Already open in a tab: the button switches to it.
+                    FilledButton.tonalIcon(
+                      onPressed: () => onOpenRepository(repo.path),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 30),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      icon: const Icon(Icons.tab, size: 14),
+                      label: Text(translate('folder_update_go_to_tab')),
+                    )
+                  else
+                    OutlinedButton.icon(
+                      onPressed: () => onOpenRepository(repo.path),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 30),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      icon: const Icon(Icons.open_in_new, size: 14),
+                      label: Text(translate('folder_update_open')),
                     ),
-                    icon: const Icon(Icons.open_in_new, size: 14),
-                    label: Text(translate('folder_update_open')),
-                  ),
                 ],
               ),
             ),

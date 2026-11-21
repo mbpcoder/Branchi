@@ -229,8 +229,18 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     _saveState();
   }
 
+  /// Index of the tab that has the repository at [path] open, or -1.
+  int _tabIndexForRepository(String path) =>
+      _tabs.indexWhere((t) => t.path != null && p.equals(t.path!, path));
+
   /// Opens the repository at [path] in a new tab, e.g. from a folder tab.
+  /// If a tab already has it open, switches to that tab instead.
   Future<void> _openRepositoryInNewTab(String path) async {
+    final existing = _tabIndexForRepository(path);
+    if (existing != -1) {
+      _selectTab(existing);
+      return;
+    }
     await RecentRepositoriesStore.addOrPromote(path);
     if (!mounted) return;
     setState(() {
@@ -367,6 +377,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                             key: ValueKey(tab.id),
                             controller: tab.folderUpdate!,
                             onOpenRepository: _openRepositoryInNewTab,
+                            isRepositoryOpen: (path) =>
+                                _tabIndexForRepository(path) != -1,
                             onChangeFolder: _changeActiveTabFolder,
                           )
                         : WelcomeForm(
