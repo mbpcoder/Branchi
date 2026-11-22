@@ -31,6 +31,22 @@ typedef _CloneDart = Pointer<Utf8> Function(
   Pointer<Utf8> path,
 );
 
+typedef _MoveToTrashNative = Pointer<Utf8> Function(Pointer<Utf8> path);
+typedef _MoveToTrashDart = Pointer<Utf8> Function(Pointer<Utf8> path);
+
+typedef _FindFilesNative = Pointer<Utf8> Function(
+  Pointer<Utf8> root,
+  Pointer<Utf8> query,
+  IntPtr limit,
+  Bool refresh,
+);
+typedef _FindFilesDart = Pointer<Utf8> Function(
+  Pointer<Utf8> root,
+  Pointer<Utf8> query,
+  int limit,
+  bool refresh,
+);
+
 typedef _IsRepositoryNative = Bool Function(Pointer<Utf8> path);
 typedef _IsRepositoryDart = bool Function(Pointer<Utf8> path);
 
@@ -326,6 +342,13 @@ class GitFfi {
             _GlobalConfigGetDart>('branchi_global_config_get'),
         _globalConfigSet = lib.lookupFunction<_GlobalConfigSetNative,
             _GlobalConfigSetDart>('branchi_global_config_set'),
+        _findFiles = lib.lookupFunction<_FindFilesNative, _FindFilesDart>(
+          'branchi_find_files',
+        ),
+        _moveToTrash =
+            lib.lookupFunction<_MoveToTrashNative, _MoveToTrashDart>(
+          'branchi_move_to_trash',
+        ),
         _freeString = lib.lookupFunction<_FreeStringNative, _FreeStringDart>(
           'branchi_free_string',
         );
@@ -376,6 +399,8 @@ class GitFfi {
   final _RemoveRemoteDart _removeRemote;
   final _GlobalConfigGetDart _globalConfigGet;
   final _GlobalConfigSetDart _globalConfigSet;
+  final _MoveToTrashDart _moveToTrash;
+  final _FindFilesDart _findFiles;
   final _FreeStringDart _freeString;
 
   /// Runs `git init` at [path] via the Rust core. Returns null on success,
@@ -411,6 +436,36 @@ class GitFfi {
       return _isRepository(pathPtr);
     } finally {
       malloc.free(pathPtr);
+    }
+  }
+
+  /// Moves [path] (a file or directory) to the OS trash / Recycle Bin.
+  /// Returns null on success, or an error message on failure.
+  String? moveToTrash(String path) {
+    final pathPtr = path.toNativeUtf8();
+    try {
+      return _consumeError(_moveToTrash(pathPtr));
+    } finally {
+      malloc.free(pathPtr);
+    }
+  }
+
+  /// Fuzzy-finds files under [root] matching [query], best first. Each
+  /// item is `{"path", "score", "positions"}`. [refresh] rebuilds the
+  /// cached file list first. Throws [GitFfiException] on failure.
+  List<dynamic> findFiles(
+    String root,
+    String query, {
+    int limit = 50,
+    bool refresh = false,
+  }) {
+    final rootPtr = root.toNativeUtf8();
+    final queryPtr = query.toNativeUtf8();
+    try {
+      return _consumeJsonList(_findFiles(rootPtr, queryPtr, limit, refresh));
+    } finally {
+      malloc.free(rootPtr);
+      malloc.free(queryPtr);
     }
   }
 

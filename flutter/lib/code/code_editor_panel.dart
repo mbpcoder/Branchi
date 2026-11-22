@@ -11,11 +11,15 @@ import 'package:re_highlight/styles/github.dart';
 
 import '../l10n/app_locale.dart';
 import '../theme/app_theme.dart';
+import 'file_languages.dart';
+import 'file_ops.dart';
+import 'file_preview.dart';
 import 'file_tree.dart' show fileTreeRefreshSignal;
+import 'language_picker.dart';
 
 /// One open file in the editor's tab strip.
 class _OpenFile {
-  _OpenFile(this.path, String initialText)
+  _OpenFile(this.path, String initialText, {this.kind = OpenFileKind.text})
       : controller = CodeLineEditingController.fromText(initialText) {
     // Compare against the controller's own (re_editor-normalized) text
     // rather than the raw file contents: re_editor may normalize line
@@ -38,7 +42,12 @@ class _OpenFile {
   /// How long after the last edit a dirty file is saved automatically.
   static const autoSaveDelay = Duration(seconds: 1);
 
-  final String path;
+  /// Mutable so the tab follows the file when it's renamed or moved.
+  String path;
+
+  /// Text files use [controller]; previews (image, SVG, binary) leave it
+  /// empty and are never dirty.
+  OpenFileKind kind;
   final CodeLineEditingController controller;
   bool isDirty = false;
   VoidCallback? onDirtyChanged;
@@ -48,7 +57,8 @@ class _OpenFile {
 }
 
 /// A VS Code-like tabbed text editor backed by `re_editor`, with syntax
-/// highlighting from `re_highlight` chosen by file extension.
+/// highlighting from `re_highlight` chosen by file name or extension (or
+/// picked by hand from the footer), plus previews for images and SVGs.
 class CodeEditorPanel extends StatefulWidget {
   const CodeEditorPanel({super.key, this.initialFilePath, this.onLanguageChanged});
 
@@ -72,17 +82,24 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
   @override
   void initState() {
     super.initState();
+    FileLanguageOverrides.overrides.addListener(_onOverridesChanged);
+    unawaited(FileLanguageOverrides.ensureLoaded());
     if (widget.initialFilePath != null) {
       unawaited(openFile(widget.initialFilePath!));
     }
   }
 
+  void _onOverridesChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    FileLanguageOverrides.overrides.removeListener(_onOverridesChanged);
     for (final file in _open) {
       file.autoSaveTimer?.cancel();
       // Flush edits still waiting on the auto-save delay.
-      if (file.isDirty) {
+      if (file.isDirty && file.kind == OpenFileKind.text) {
         try {
           File(file.path).writeAsStringSync(file.controller.text);
         } catch (_) {
@@ -103,8 +120,17 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
     }
 
     try {
-      final text = await File(path).readAsString();
-      final file = _OpenFile(path, text);
+      final kind = await detectOpenFileKind(path);
+      final text =
+          kind == OpenFileKind.text ? await File(path).readAsString() : '';
+      if (!mounted) return;
+      // Opened meanwhile (e.g. a double click): just switch to it.
+      final openedIndex = _open.indexWhere((f) => f.path == path);
+      if (openedIndex != -1) {
+        setState(() => _activeIndex = openedIndex);
+        return;
+      }
+      final file = _OpenFile(path, text, kind: kind);
       file.onDirtyChanged = () => setState(() {});
       file.onAutoSave = () => unawaited(_save(file));
       setState(() {
@@ -112,14 +138,110 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
         _activeIndex = _open.length - 1;
         _error = null;
       });
+    } on FileSystemException catch (error) {
+      if (!mounted) return;
+      // Not valid UTF-8 text: show it as a binary file instead of failing.
+      if (error.message.contains('decode')) {
+        final file = _OpenFile(path, '', kind: OpenFileKind.binary);
+        setState(() {
+          _open.add(file);
+          _activeIndex = _open.length - 1;
+          _error = null;
+        });
+        return;
+      }
+      setState(() => _error = 'Failed to open ${p.basename(path)}: $error');
     } catch (error) {
+      if (!mounted) return;
       setState(() => _error = 'Failed to open ${p.basename(path)}: $error');
     }
+  }
+
+  /// Switches an SVG preview tab to its source text.
+  Future<void> _showSource(_OpenFile file) async {
+    try {
+      final text = await File(file.path).readAsString();
+      if (!mounted || !_open.contains(file)) return;
+      setState(() {
+        file.controller.text = text;
+        file.savedText = file.controller.text;
+        file.isDirty = false;
+        file.kind = OpenFileKind.text;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = 'Failed to open ${p.basename(file.path)}: $error');
+    }
+  }
+
+  /// Saves pending edits in tabs for [path] or anything under it, so a
+  /// rename/move/delete doesn't race with auto-save. Returns false if a
+  /// save failed.
+  Future<bool> flushPendingSaves(String path) async {
+    for (final file in List.of(_open)) {
+      if (!FileOps.isSameOrWithin(path, file.path)) continue;
+      if (file.isDirty && !await _save(file)) return false;
+      file.autoSaveTimer?.cancel();
+    }
+    return true;
+  }
+
+  /// Points tabs for [from] (a file or folder) at [to] after a rename or
+  /// move.
+  void handlePathMoved(String from, String to) {
+    var changed = false;
+    for (final file in _open) {
+      if (!FileOps.isSameOrWithin(from, file.path)) continue;
+      file.path = p.equals(from, file.path)
+          ? to
+          : p.join(to, p.relative(file.path, from: from));
+      changed = true;
+    }
+    if (changed && mounted) setState(() {});
+  }
+
+  /// Closes tabs for [path] (a file or folder) after it was deleted,
+  /// dropping any unsaved edits.
+  void handlePathDeleted(String path) {
+    final active = _activeIndex >= 0 && _activeIndex < _open.length
+        ? _open[_activeIndex]
+        : null;
+    final removed = _open
+        .where((f) => FileOps.isSameOrWithin(path, f.path))
+        .toList();
+    if (removed.isEmpty) return;
+    for (final file in removed) {
+      file.autoSaveTimer?.cancel();
+      file.controller.dispose();
+    }
+    setState(() {
+      _open.removeWhere(removed.contains);
+      final kept = active == null ? -1 : _open.indexOf(active);
+      _activeIndex = kept != -1
+          ? kept
+          : (_open.isEmpty ? -1 : _activeIndex.clamp(0, _open.length - 1));
+    });
+  }
+
+  /// Opens the language picker for the active text tab.
+  Future<void> _pickLanguage(_OpenFile file) async {
+    final choice = await showLanguagePicker(
+      context,
+      current: FileLanguageOverrides.languageFor(file.path),
+      detected: detectFileLanguage(file.path),
+      hasOverride: FileLanguageOverrides.hasOverride(file.path),
+    );
+    if (choice == null) return;
+    await FileLanguageOverrides.set(
+      file.path,
+      choice == kAutoDetectLanguage ? null : choice,
+    );
   }
 
   /// Writes [file] to disk. Returns false (and shows the error) on failure.
   Future<bool> _save(_OpenFile file) async {
     file.autoSaveTimer?.cancel();
+    if (file.kind != OpenFileKind.text) return true;
     // Edits made while the write is in flight must keep the file dirty, so
     // compare against the text actually written rather than the live text.
     final text = file.controller.text;
@@ -163,85 +285,6 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
         _activeIndex -= 1;
       }
     });
-  }
-
-  String? _languageNameFor(String path) {
-    final ext = p.extension(path).replaceFirst('.', '').toLowerCase();
-    const extToLanguage = {
-      'dart': 'dart',
-      'rs': 'rust',
-      'js': 'javascript',
-      'jsx': 'javascript',
-      'mjs': 'javascript',
-      'cjs': 'javascript',
-      'ts': 'typescript',
-      'tsx': 'typescript',
-      'json': 'json',
-      'yaml': 'yaml',
-      'yml': 'yaml',
-      'md': 'markdown',
-      'markdown': 'markdown',
-      'sh': 'bash',
-      'bash': 'bash',
-      'py': 'python',
-      'xml': 'xml',
-      'html': 'xml',
-      'php': 'php',
-      'css': 'css',
-      'scss': 'scss',
-      'cs': 'csharp',
-      'java': 'java',
-      'ini': 'ini',
-      'blade': 'php',
-      'vue': 'vue',
-      'env': 'properties',
-    };
-    final basename = p.basename(path).toLowerCase();
-    if (basename.endsWith('.blade.php')) return 'php';
-    if (basename == '.env' || basename.startsWith('.env.')) return 'properties';
-    return extToLanguage[ext];
-  }
-
-  /// The label shown in the bottom bar for the active file's detected type,
-  /// e.g. "PHP", "TypeScript". Kept separate from [_languageNameFor] (which
-  /// returns the `re_highlight` grammar key) since a few types share a
-  /// grammar but should still read with their own name (Blade, .env).
-  static const Map<String, String> _fileTypeLabels = {
-    'dart': 'Dart',
-    'rs': 'Rust',
-    'js': 'JavaScript',
-    'jsx': 'JSX',
-    'mjs': 'JavaScript',
-    'cjs': 'JavaScript',
-    'ts': 'TypeScript',
-    'tsx': 'TSX',
-    'json': 'JSON',
-    'yaml': 'YAML',
-    'yml': 'YAML',
-    'md': 'Markdown',
-    'markdown': 'Markdown',
-    'sh': 'Shell',
-    'bash': 'Shell',
-    'py': 'Python',
-    'xml': 'XML',
-    'html': 'HTML',
-    'php': 'PHP',
-    'css': 'CSS',
-    'scss': 'SCSS',
-    'cs': 'C#',
-    'java': 'Java',
-    'ini': 'INI',
-    'blade': 'Blade',
-    'vue': 'Vue',
-    'env': 'Env',
-  };
-
-  String? _fileTypeLabelFor(String path) {
-    final basename = p.basename(path).toLowerCase();
-    if (basename.endsWith('.blade.php')) return 'Blade';
-    if (basename == '.env' || basename.startsWith('.env.')) return 'Env';
-    final ext = p.extension(path).replaceFirst('.', '').toLowerCase();
-    return _fileTypeLabels[ext];
   }
 
   void _notifyLanguage(String? label) {
@@ -290,9 +333,19 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
 
     final active = _open[_activeIndex];
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final languageName = _languageNameFor(active.path);
-    final mode = languageName == null ? null : builtinAllLanguages[languageName];
-    final fileTypeLabel = _fileTypeLabelFor(active.path);
+    final language = active.kind == OpenFileKind.text
+        ? FileLanguageOverrides.languageFor(active.path) ?? kPlainText
+        : null;
+    final languageName = language?.grammar;
+    final mode = languageName == null || languageName == kPlainTextGrammar
+        ? null
+        : builtinAllLanguages[languageName];
+    final fileTypeLabel = switch (active.kind) {
+      OpenFileKind.text => language!.label,
+      OpenFileKind.image => translate('preview_image'),
+      OpenFileKind.svg => 'SVG',
+      OpenFileKind.binary => null,
+    };
     _notifyLanguage(fileTypeLabel);
 
     final baseCodeTheme = isDark ? githubDarkTheme : githubTheme;
@@ -340,7 +393,9 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
                       color: c.muted,
                       visualDensity: VisualDensity.compact,
                       tooltip: 'Save (Ctrl+S)',
-                      onPressed: active.isDirty ? () => _save(active) : null,
+                      onPressed: active.isDirty && active.kind == OpenFileKind.text
+                          ? () => _save(active)
+                          : null,
                     ),
                   ),
                 ),
@@ -369,6 +424,18 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
                 ],
               ),
             ),
+          if (active.kind != OpenFileKind.text)
+            Expanded(
+              child: FilePreview(
+                key: ValueKey(active.path),
+                path: active.path,
+                kind: active.kind,
+                onShowSource: active.kind == OpenFileKind.svg
+                    ? () => _showSource(active)
+                    : null,
+              ),
+            ),
+          if (active.kind == OpenFileKind.text)
           Expanded(
             child: CallbackShortcuts(
               bindings: {
@@ -447,7 +514,12 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
               ),
             ),
           ),
-          _EditorFooter(file: active, languageLabel: fileTypeLabel),
+          if (active.kind == OpenFileKind.text)
+            _EditorFooter(
+              file: active,
+              languageLabel: fileTypeLabel,
+              onPickLanguage: () => _pickLanguage(active),
+            ),
         ],
       ),
     );
@@ -457,10 +529,15 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
 /// 28px status footer: saved/modified on the left, cursor position,
 /// encoding and language on the right.
 class _EditorFooter extends StatelessWidget {
-  const _EditorFooter({required this.file, required this.languageLabel});
+  const _EditorFooter({
+    required this.file,
+    required this.languageLabel,
+    required this.onPickLanguage,
+  });
 
   final _OpenFile file;
   final String? languageLabel;
+  final VoidCallback onPickLanguage;
 
   @override
   Widget build(BuildContext context) {
@@ -477,11 +554,7 @@ class _EditorFooter extends StatelessWidget {
           final position = translate('editor_cursor_position')
               .replaceAll('{line}', '${selection.extentIndex + 1}')
               .replaceAll('{col}', '${selection.extentOffset + 1}');
-          final parts = [
-            position,
-            'UTF-8',
-            ?languageLabel,
-          ];
+          final parts = [position, 'UTF-8'];
           return Row(
             children: [
               Text(
@@ -490,6 +563,23 @@ class _EditorFooter extends StatelessWidget {
               ),
               const Spacer(),
               Text(parts.join('  ·  '), style: style),
+              if (languageLabel != null) ...[
+                Text('  ·  ', style: style),
+                Tooltip(
+                  message: translate('editor_select_language'),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(4),
+                    onTap: onPickLanguage,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      child: Text(languageLabel!, style: style),
+                    ),
+                  ),
+                ),
+              ],
             ],
           );
         },

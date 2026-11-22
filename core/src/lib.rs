@@ -7,6 +7,8 @@
 
 pub mod db;
 pub mod ffi;
+pub mod file_search;
+pub mod fs_ops;
 pub mod git;
 pub mod logging;
 

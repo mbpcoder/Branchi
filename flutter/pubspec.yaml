@@ -21,6 +21,7 @@ dependencies:
   ffi: ^2.1.3
   re_editor: ^0.10.0
   re_highlight: ^0.0.3
+  flutter_svg: ^2.5.0
 
 dev_dependencies:
   flutter_test:

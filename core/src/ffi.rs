@@ -509,6 +509,39 @@ pub unsafe extern "C" fn branchi_global_config_set(
     result_to_c_string(git::set_global_identity(&name, &email))
 }
 
+/// Moves `path` (a file or directory) to the OS trash / Recycle Bin.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
+/// call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_move_to_trash(path: *const c_char) -> *mut c_char {
+    let path = c_str_to_string(path);
+    result_to_c_string(crate::fs_ops::move_to_trash(&path))
+}
+
+/// Fuzzy-finds files under `root` matching `query` (`.gitignore`d files
+/// and `.git` skipped), best first, at most `limit`. With `refresh` the
+/// cached file list for `root` is rebuilt first. Returns
+/// `{"ok": [FileMatch, ...]}` or `{"error": "..."}`.
+///
+/// # Safety
+/// `root` and `query` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_find_files(
+    root: *const c_char,
+    query: *const c_char,
+    limit: usize,
+    refresh: bool,
+) -> *mut c_char {
+    let root = c_str_to_string(root);
+    let query = c_str_to_string(query);
+    result_to_json_c_string(crate::file_search::find_files(
+        &root, &query, limit, refresh,
+    ))
+}
+
 /// Releases a string previously returned by one of this module's
 /// functions. Safe to call with a null pointer (no-op).
 ///
