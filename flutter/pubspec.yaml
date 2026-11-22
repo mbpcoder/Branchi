@@ -15,7 +15,9 @@ dependencies:
   window_manager: ^0.5.2
   shared_preferences: ^2.2.2
   xterm: ^4.0.0
-  flutter_pty: ^0.4.1
+  # Vendored with a Windows fix; see third_party/flutter_pty/BRANCHI_PATCHES.md.
+  flutter_pty:
+    path: third_party/flutter_pty
   file_picker: ^8.1.3
   path: ^1.9.0
   ffi: ^2.1.3
