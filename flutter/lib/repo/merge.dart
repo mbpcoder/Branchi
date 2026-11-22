@@ -423,7 +423,7 @@ class _MergeDialogState extends State<_MergeDialog> {
               title: Text(translate('merge_no_ff')),
               subtitle: _noFastForward
                   ? null
-                  : Text(translate('merge_ff_hint')),
+                  : Text(t('merge_ff_hint')),
             ),
           if (preview.dirty) ...[
             const SizedBox(height: 10),

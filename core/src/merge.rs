@@ -773,6 +773,64 @@ mod tests {
     }
 
     #[test]
+    fn squash_conflict_resolve_and_finish() {
+        let (dir, repo, _) = diverged(true);
+        let before = head(&repo).id();
+        let out = repo
+            .merge("feature", MergeMode::Squash, "Squash it")
+            .unwrap();
+        assert!(matches!(out.result, MergeResult::Conflicts));
+        repo.resolve_conflict("a.txt", "ours").unwrap();
+        let state = repo.merge_state().unwrap().unwrap();
+        assert!(matches!(state.kind, MergeKind::Squash));
+        assert!(state.conflicts.is_empty());
+        assert_eq!(state.message, "Squash it");
+        repo.commit_with_configured_identity("Squash it").unwrap();
+        let commit = head(&repo);
+        assert_eq!(commit.parent_count(), 1);
+        assert_eq!(commit.parent_id(0).unwrap(), before);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "one\nMAIN\nthree\n"
+        );
+        assert!(dir.path().join("f.txt").exists());
+        assert!(repo.merge_state().unwrap().is_none());
+    }
+
+    #[test]
+    fn merge_abort_and_no_fast_forward() {
+        let (dir, repo, main) = diverged(true);
+        let before = head(&repo).id();
+        repo.merge("feature", MergeMode::Merge, "m").unwrap();
+        repo.abort_merge().unwrap();
+        assert_eq!(head(&repo).id(), before);
+        assert!(repo.merge_state().unwrap().is_none());
+        assert!(!dir.path().join("f.txt").exists());
+
+        // A fast-forward that is forced to be a merge commit.
+        repo.create_branch("old", None).unwrap();
+        commit(&repo, dir.path(), "n.txt", "n");
+        repo.checkout_branch("old").unwrap();
+        let out = repo
+            .merge(&main, MergeMode::NoFastForward, "No ff")
+            .unwrap();
+        assert!(matches!(out.result, MergeResult::Committed));
+        assert_eq!(head(&repo).parent_count(), 2);
+    }
+
+    #[test]
+    fn rebase_continue_with_new_message() {
+        let (_dir, repo, main) = diverged(true);
+        repo.checkout_branch("feature").unwrap();
+        repo.rebase(&main).unwrap();
+        repo.resolve_conflict("a.txt", "theirs").unwrap();
+        repo.continue_rebase(Some("Reworded")).unwrap();
+        let tip = head(&repo);
+        assert_eq!(tip.message(), Some("f.txt"));
+        assert_eq!(tip.parent(0).unwrap().message(), Some("Reworded"));
+    }
+
+    #[test]
     fn refuses_with_uncommitted_changes() {
         let (dir, repo, _) = diverged(false);
         write(dir.path(), "a.txt", "dirty");
