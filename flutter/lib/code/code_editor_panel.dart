@@ -780,7 +780,10 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
                 const SingleActivator(LogicalKeyboardKey.keyS, meta: true):
                     () => _save(active),
               },
-              child: Focus(
+              // Code always reads left to right, also in Arabic / Persian.
+              child: Directionality(
+                textDirection: TextDirection.ltr,
+                child: Focus(
                 autofocus: true,
                 child: CodeEditor(
                   key: ValueKey(active.path),
@@ -848,6 +851,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
                     );
                   },
                 ),
+              ),
               ),
             ),
           ),

@@ -14,9 +14,9 @@ import 'remotes_dialog.dart';
 const List<int> kBranchWatchIntervalsMinutes = [1, 2, 3, 4, 5, 10, 15, 30, 45, 60];
 
 String branchWatchIntervalLabel(int minutes) {
-  if (minutes == 60) return '1 hour';
-  if (minutes == 1) return '1 minute';
-  return '$minutes minutes';
+  if (minutes == 60) return translate('bs_1_hour');
+  if (minutes == 1) return translate('bs_1_minute');
+  return translate('bs_minutes').replaceAll('{n}', '$minutes');
 }
 
 // Dismissing the menu without picking anything also resolves to `null` from
@@ -69,7 +69,7 @@ Future<int?> showBranchWatchIntervalMenu(
                   ? const Icon(Icons.check, size: 16)
                   : null,
             ),
-            const Text('Off'),
+            Text(translate('bs_off')),
           ],
         ),
       ),
@@ -309,23 +309,24 @@ class _BranchSidebarState extends State<BranchSidebar> {
     return showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('No local branch exists'),
+        title: Text(translate('bs_no_local_title')),
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(labelText: 'New branch name'),
+          decoration:
+              InputDecoration(labelText: translate('bs_new_branch_name')),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
+            child: Text(translate('cancel')),
           ),
           FilledButton(
             onPressed: () {
               final name = controller.text.trim();
               if (name.isNotEmpty) Navigator.pop(dialogContext, name);
             },
-            child: const Text('Create'),
+            child: Text(translate('bs_create')),
           ),
         ],
       ),
@@ -340,22 +341,22 @@ class _BranchSidebarState extends State<BranchSidebar> {
           branch.isRemote
               ? translate('branch_delete_remote_title')
                   .replaceAll('{remote}', branch.name.split('/').first)
-              : 'Delete branch',
+              : translate('bs_delete_title'),
         ),
         content: Text(
           branch.isRemote
               ? translate('branch_delete_remote_body')
                   .replaceAll('{branch}', branch.name)
-              : 'Delete branch "${branch.name}"?',
+              : translate('bs_delete_body').replaceAll('{branch}', branch.name),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+            child: Text(translate('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Delete'),
+            child: Text(translate('bs_delete')),
           ),
         ],
       ),
@@ -442,8 +443,8 @@ class _BranchSidebarState extends State<BranchSidebar> {
         Offset.zero & overlay.size,
       ),
       items: [
-        const PopupMenuItem(value: 'checkout', child: Text('Checkout')),
-        const PopupMenuItem(value: 'update', child: Text('Update')),
+        PopupMenuItem(value: 'checkout', child: Text(translate('bs_checkout'))),
+        PopupMenuItem(value: 'update', child: Text(translate('bs_update'))),
         if (canMergeIn || base != null) const PopupMenuDivider(),
         if (canMergeIn)
           PopupMenuItem(
@@ -468,8 +469,8 @@ class _BranchSidebarState extends State<BranchSidebar> {
           ),
         if (canMergeIn || base != null) const PopupMenuDivider(),
         if (!branch.isRemote)
-          const PopupMenuItem(value: 'push', child: Text('Push')),
-        const PopupMenuItem(value: 'delete', child: Text('Delete')),
+          PopupMenuItem(value: 'push', child: Text(translate('bs_push'))),
+        PopupMenuItem(value: 'delete', child: Text(translate('bs_delete'))),
       ],
     );
     if (!mounted || action == null) return;
@@ -533,19 +534,22 @@ class _BranchSidebarState extends State<BranchSidebar> {
           value: 'watch',
           child: Text(
             interval == null
-                ? 'Auto-refresh: off'
-                : 'Auto-refresh: every ${branchWatchIntervalLabel(interval)}',
+                ? translate('bs_auto_refresh_off')
+                : translate('bs_auto_refresh_every').replaceAll(
+                    '{interval}',
+                    branchWatchIntervalLabel(interval),
+                  ),
           ),
         ),
-        const PopupMenuItem(value: 'config', child: Text('Git config…')),
-        const PopupMenuItem(
+        PopupMenuItem(value: 'config', child: Text(translate('bs_git_config'))),
+        PopupMenuItem(
           value: 'explorer',
-          child: Text('Open in file explorer'),
+          child: Text(translate('bs_open_explorer')),
         ),
         if (widget.onOpenInTerminal != null)
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'terminal',
-            child: Text('Open in terminal'),
+            child: Text(translate('bs_open_terminal')),
           ),
       ],
     );
@@ -734,15 +738,17 @@ class _BranchSidebarState extends State<BranchSidebar> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 _SidebarAction(
-                  tooltip: _isSearching ? 'Close search' : 'Search branches',
+                  tooltip: translate(
+                    _isSearching ? 'bs_close_search' : 'bs_search',
+                  ),
                   icon: _isSearching ? Icons.close : Icons.search,
                   active: _isSearching,
                   onPressed: _toggleSearch,
                 ),
                 _SidebarAction(
                   tooltip: widget.isUpdatingCurrentBranch
-                      ? 'Pulling…'
-                      : 'Update current branch',
+                      ? translate('bs_pulling')
+                      : translate('bs_update_current'),
                   icon: Icons.refresh,
                   busy: widget.isUpdatingCurrentBranch,
                   onPressed: widget.isUpdatingCurrentBranch
@@ -752,9 +758,13 @@ class _BranchSidebarState extends State<BranchSidebar> {
                 Builder(
                   builder: (context) => _SidebarAction(
                     tooltip: watching
-                        ? 'More · auto-refresh every '
-                            '${branchWatchIntervalLabel(widget.watchIntervalMinutes!)}'
-                        : 'More',
+                        ? translate('bs_more_watching').replaceAll(
+                            '{interval}',
+                            branchWatchIntervalLabel(
+                              widget.watchIntervalMinutes!,
+                            ),
+                          )
+                        : translate('bs_more'),
                     icon: Icons.more_horiz,
                     badge: watching,
                     onPressed: () {
@@ -791,7 +801,7 @@ class _BranchSidebarState extends State<BranchSidebar> {
                         decoration: InputDecoration(
                           isDense: true,
                           filled: false,
-                          hintText: 'Search branches',
+                          hintText: translate('bs_search'),
                           hintStyle: TextStyle(fontSize: 13, color: b.muted),
                           border: InputBorder.none,
                           enabledBorder: InputBorder.none,
