@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "installer": signs the Inno Setup installer
+  (dist/branchi-setup.exe) built by .github/workflows/release.yml.
+  Paste this into the SignPath project's artifact configuration with slug
+  "installer".
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file product-name="Branchi" product-version="${version}" path="branchi-setup.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

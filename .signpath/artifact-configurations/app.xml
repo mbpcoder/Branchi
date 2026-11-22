@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "app": signs Branchi's own executable inside
+  the Windows release folder (uploaded by .github/workflows/release.yml).
+  Third-party DLLs (Flutter engine, plugins) are left unsigned, as SignPath
+  Foundation only allows signing binaries built from this project's source.
+  Paste this into the SignPath project's artifact configuration with slug "app".
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file-set product-name="Branchi" product-version="${version}">
+      <include path="branchi.exe" />
+      <for-each>
+        <authenticode-sign />
+      </for-each>
+    </pe-file-set>
+  </zip-file>
+</artifact-configuration>

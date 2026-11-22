@@ -13,6 +13,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Release version
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Build native library (branchi_core.dll)
@@ -29,6 +34,14 @@ jobs:
             flutter create --platforms=windows .
           }
 
+      - name: Set Windows product name
+        working-directory: flutter
+        # SignPath checks the product name on signed files; Flutter's
+        # template uses the lowercase package name.
+        run: |
+          $rc = "windows\runner\Runner.rc"
+          (Get-Content $rc) -replace '(VALUE "ProductName", )"[^"]*"', '$1"Branchi"' | Set-Content $rc
+
       - name: Install Flutter dependencies
         working-directory: flutter
         run: flutter pub get
@@ -42,6 +55,33 @@ jobs:
       - name: Bundle native library with the app
         run: Copy-Item target\release\branchi_core.dll flutter\build\windows\x64\runner\Release\branchi_core.dll
 
+      # Code signing via SignPath Foundation. Skipped (unsigned release) until
+      # the SIGNPATH_* repository variables are set; see docs/TODO.md.
+      - name: Upload unsigned app for signing
+        id: upload-unsigned-app
+        if: vars.SIGNPATH_PROJECT_SLUG != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: branchi-windows-unsigned
+          path: flutter/build/windows/x64/runner/Release/
+
+      - name: Sign app (SignPath)
+        if: vars.SIGNPATH_PROJECT_SLUG != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: app
+          github-artifact-id: ${{ steps.upload-unsigned-app.outputs.artifact-id }}
+          parameters: |
+            version: ${{ toJSON(steps.version.outputs.version) }}
+          wait-for-completion: true
+          # Each request waits for a manual approval in SignPath.
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: flutter/build/windows/x64/runner/Release
+
       - name: Package release archive
         run: Compress-Archive -Path flutter\build\windows\x64\runner\Release\* -DestinationPath branchi-windows.zip
 
@@ -49,6 +89,30 @@ jobs:
         run: |
           $version = "$env:GITHUB_REF_NAME" -replace '^v',''
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" "/DSourceDir=$env:GITHUB_WORKSPACE\flutter\build\windows\x64\runner\Release" installer\windows\branchi.iss
+
+      - name: Upload unsigned installer for signing
+        id: upload-unsigned-installer
+        if: vars.SIGNPATH_PROJECT_SLUG != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: branchi-setup-unsigned
+          path: dist/branchi-setup.exe
+
+      - name: Sign installer (SignPath)
+        if: vars.SIGNPATH_PROJECT_SLUG != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.upload-unsigned-installer.outputs.artifact-id }}
+          parameters: |
+            version: ${{ toJSON(steps.version.outputs.version) }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: dist
 
       - name: Create or update release
         env:
