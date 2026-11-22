@@ -10,7 +10,7 @@ use serde::Serialize;
 use std::path::Path;
 
 pub struct GitRepo {
-    repo: Repository,
+    pub(crate) repo: Repository,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1062,8 +1062,13 @@ impl GitRepo {
             .signature()
             .context("no user.name/user.email configured for this repository")?;
 
+        if index.has_conflicts() {
+            anyhow::bail!("Resolve all conflicts before committing.");
+        }
+        // Finishing a merge: the merged branch becomes the second parent.
         let parent = self.repo.head().ok().and_then(|h| h.peel_to_commit().ok());
-        let parents: Vec<&git2::Commit> = parent.iter().collect();
+        let merged = self.merge_head()?;
+        let parents: Vec<&git2::Commit> = parent.iter().chain(merged.iter()).collect();
 
         let oid = self.repo.commit(
             Some("HEAD"),
@@ -1073,6 +1078,7 @@ impl GitRepo {
             &tree,
             &parents,
         )?;
+        self.clear_merge_state()?;
 
         Ok(oid.to_string())
     }

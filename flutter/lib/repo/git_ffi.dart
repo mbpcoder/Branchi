@@ -163,6 +163,19 @@ typedef _UpdateBranchDart = Pointer<Utf8> Function(
 typedef _StatusNative = Pointer<Utf8> Function(Pointer<Utf8> path);
 typedef _StatusDart = Pointer<Utf8> Function(Pointer<Utf8> path);
 
+typedef _Str1 = Pointer<Utf8> Function(Pointer<Utf8> a);
+typedef _Str2 = Pointer<Utf8> Function(Pointer<Utf8> a, Pointer<Utf8> b);
+typedef _Str3 = Pointer<Utf8> Function(
+  Pointer<Utf8> a,
+  Pointer<Utf8> b,
+  Pointer<Utf8> c,
+);
+typedef _Str4 = Pointer<Utf8> Function(
+  Pointer<Utf8> a,
+  Pointer<Utf8> b,
+  Pointer<Utf8> c,
+  Pointer<Utf8> d,
+);
 typedef _StageNative = Pointer<Utf8> Function(
   Pointer<Utf8> path,
   Pointer<Utf8> filePath,
@@ -380,6 +393,15 @@ class GitFfi {
         _globalConfigSet = lib.lookupFunction<_GlobalConfigSetNative,
             _GlobalConfigSetDart>('branchi_global_config_set'),
         _blame = lib.lookupFunction<_BlameNative, _BlameDart>('branchi_blame'),
+        _mergePreview = lib.lookupFunction<_Str2, _Str2>(
+          'branchi_merge_preview',
+        ),
+        _merge = lib.lookupFunction<_Str4, _Str4>('branchi_merge'),
+        _mergeState = lib.lookupFunction<_Str1, _Str1>('branchi_merge_state'),
+        _abortMerge = lib.lookupFunction<_Str1, _Str1>('branchi_abort_merge'),
+        _resolveConflict = lib.lookupFunction<_Str3, _Str3>(
+          'branchi_resolve_conflict',
+        ),
         _setPruneOnFetch =
             lib.lookupFunction<_SetPruneOnFetchNative, _SetPruneOnFetchDart>(
           'branchi_set_prune_on_fetch',
@@ -450,6 +472,63 @@ class GitFfi {
   final _SearchContentDart _searchContent;
   final _BlameDart _blame;
   final _SetPruneOnFetchDart _setPruneOnFetch;
+  final _Str2 _mergePreview;
+  final _Str4 _merge;
+  final _Str1 _mergeState;
+  final _Str1 _abortMerge;
+  final _Str3 _resolveConflict;
+
+  /// Runs [call] with [args] as native strings, freeing them afterwards.
+  T _withStrings<T>(List<String> args, T Function(List<Pointer<Utf8>>) call) {
+    final ptrs = [for (final a in args) a.toNativeUtf8()];
+    try {
+      return call(ptrs);
+    } finally {
+      for (final p in ptrs) {
+        malloc.free(p);
+      }
+    }
+  }
+
+  /// What merging branch [source] into the current branch would bring in.
+  Map<String, dynamic> mergePreview(String path, String source) =>
+      _withStrings([path, source], (p) => _consumeJsonMap(_mergePreview(p[0], p[1])));
+
+  /// Merges [source] into the current branch; [mode] is `merge`, `no_ff`
+  /// or `squash`. Returns the decoded outcome.
+  Map<String, dynamic> merge(
+    String path,
+    String source,
+    String mode,
+    String message,
+  ) =>
+      _withStrings(
+        [path, source, mode, message],
+        (p) => _consumeJsonMap(_merge(p[0], p[1], p[2], p[3])),
+      );
+
+  /// The merge waiting to be finished, or null.
+  Map<String, dynamic>? mergeState(String path) => _withStrings([path], (p) {
+        final resultPtr = _mergeState(p[0]);
+        final text = resultPtr.toDartString();
+        _freeString(resultPtr);
+        final decoded = jsonDecode(text) as Map<String, dynamic>;
+        if (decoded.containsKey('error')) {
+          throw GitFfiException(decoded['error'] as String);
+        }
+        return decoded['ok'] as Map<String, dynamic>?;
+      });
+
+  /// Aborts the merge in progress. Null on success, else the error.
+  String? abortMerge(String path) =>
+      _withStrings([path], (p) => _consumeError(_abortMerge(p[0])));
+
+  /// Takes [side] (`ours` / `theirs`) whole for conflicted [file].
+  String? resolveConflict(String path, String file, String side) =>
+      _withStrings(
+        [path, file, side],
+        (p) => _consumeError(_resolveConflict(p[0], p[1], p[2])),
+      );
 
   /// Whether fetches (Fetch, Pull, auto-pull) remove remote branches that
   /// were deleted on the remote. On by default in the core.

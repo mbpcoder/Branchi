@@ -13,6 +13,8 @@ import 'package:re_highlight/styles/github.dart';
 import '../l10n/app_locale.dart';
 import '../repo/commit_list.dart' show formatRelativeTime;
 import '../theme/app_theme.dart';
+import '../repo/git_actions.dart';
+import 'conflict_markers.dart';
 import 'file_languages.dart';
 import 'file_ops.dart';
 import 'file_preview.dart';
@@ -267,6 +269,9 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
         _open.add(file);
         _activeIndex = _open.length - 1;
         _error = null;
+        if (text.contains('\n=======') && text.contains('<<<<<<<')) {
+          _hadConflicts.add(path);
+        }
       });
       _refreshBlame(file);
       if (line != null) _revealPosition(file, line, column, length);
@@ -510,6 +515,28 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
   }
 
   /// Writes [file] to disk. Returns false (and shows the error) on failure.
+  /// Files opened with merge conflict markers; once their blocks are gone
+  /// the conflict bar offers to mark them resolved.
+  final Set<String> _hadConflicts = {};
+
+  /// Saves [file] and stages it, which tells git its conflict is resolved.
+  Future<void> _markResolved(_OpenFile file) async {
+    final root = widget.repoRoot;
+    if (root == null) return;
+    final rel = repoRelativePath(root, file.path);
+    if (rel == null) return;
+    if (file.isDirty && !await _save(file)) return;
+    final result = await GitActions.stage(root, rel);
+    if (!mounted) return;
+    setState(() {
+      if (result.isSuccess) {
+        _hadConflicts.remove(file.path);
+      } else {
+        _error = result.error;
+      }
+    });
+  }
+
   Future<bool> _save(_OpenFile file) async {
     file.autoSaveTimer?.cancel();
     if (file.kind != OpenFileKind.text) return true;
@@ -727,6 +754,17 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
                     ? () => _showSource(active)
                     : null,
               ),
+            ),
+          if (active.kind == OpenFileKind.text)
+            ConflictBar(
+              key: ValueKey('conflicts:${active.path}'),
+              controller: active.controller,
+              showResolved: _hadConflicts.contains(active.path),
+              onDismissResolved: () =>
+                  setState(() => _hadConflicts.remove(active.path)),
+              onMarkResolved: widget.repoRoot == null
+                  ? null
+                  : () => unawaited(_markResolved(active)),
             ),
           if (active.kind == OpenFileKind.text)
           Expanded(

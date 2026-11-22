@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../l10n/app_locale.dart';
 import '../theme/app_theme.dart';
 import 'changes/unified_diff_view.dart';
+import 'merge.dart';
 import 'models.dart';
 
 /// Status bar shown at the top of the commit-log column: summarizes the
@@ -82,6 +83,9 @@ class WorkingChangesDetail extends StatefulWidget {
     required this.onRefresh,
     this.branchName,
     this.loadDiff,
+    this.mergeState,
+    this.onResolveConflict,
+    this.onAbortMerge,
   });
 
   final List<StatusEntry> status;
@@ -104,6 +108,12 @@ class WorkingChangesDetail extends StatefulWidget {
   /// a placeholder instead.
   final Future<String?> Function(StatusEntry entry, {required bool staged})?
       loadDiff;
+
+  /// A merge waiting to be finished: shows a banner, the conflicted files
+  /// with resolve buttons, and turns Commit into "Finish merge".
+  final MergeState? mergeState;
+  final Future<void> Function(String file, String side)? onResolveConflict;
+  final Future<void> Function()? onAbortMerge;
 
   @override
   State<WorkingChangesDetail> createState() => _WorkingChangesDetailState();
@@ -129,18 +139,41 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
 
   List<StatusEntry> get _staged =>
       widget.status.where((e) => e.staged != null).toList();
-  List<StatusEntry> get _unstaged =>
-      widget.status.where((e) => e.unstaged != null).toList();
+  List<StatusEntry> get _unstaged => widget.status
+      .where((e) => e.unstaged != null && !_conflicts.contains(e.path))
+      .toList();
+
+  StatusEntry? _statusOf(String path) =>
+      widget.status.where((e) => e.path == path).firstOrNull;
+
+  Set<String> get _conflicts => {...?widget.mergeState?.conflicts};
+
+  /// The merge message the form was last filled with, so it's filled once.
+  String? _filledMergeMessage;
+
+  /// Puts the merge's message into the commit form when a merge shows up.
+  void _fillMergeMessage() {
+    final message = widget.mergeState?.message;
+    if (message == null || message == _filledMergeMessage) return;
+    _filledMergeMessage = message;
+    final split = message.indexOf('\n');
+    _summaryController.text =
+        split == -1 ? message : message.substring(0, split).trim();
+    _descriptionController.text =
+        split == -1 ? '' : message.substring(split + 1).trim();
+  }
 
   @override
   void initState() {
     super.initState();
+    _fillMergeMessage();
     _syncSelection();
   }
 
   @override
   void didUpdateWidget(covariant WorkingChangesDetail oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _fillMergeMessage();
     if (!identical(oldWidget.status, widget.status) ||
         oldWidget.loadDiff != widget.loadDiff) {
       _syncSelection(force: true);
@@ -236,7 +269,10 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
   bool get _canCommit =>
       !_isCommitting &&
       _summaryController.text.trim().isNotEmpty &&
-      widget.status.any((e) => e.isStaged);
+      _conflicts.isEmpty &&
+      // A merge can be finished even when it changed nothing.
+      (widget.status.any((e) => e.isStaged) ||
+          (widget.mergeState != null && !widget.mergeState!.isSquash));
 
   Future<void> _commit({required bool push}) async {
     if (!_canCommit) return;
@@ -364,7 +400,7 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
         ),
       );
     }
-    if (widget.status.isEmpty) {
+    if (widget.status.isEmpty && widget.mergeState == null) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -384,9 +420,44 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
     final staged = _staged;
     final unstaged = _unstaged;
     final busy = _isBulkUpdating || widget.isLoading;
+    final merge = widget.mergeState;
     return ListView(
       padding: const EdgeInsets.only(bottom: 12),
       children: [
+        if (merge != null) ...[
+          _MergeBanner(
+            state: merge,
+            onAbort: busy ? null : widget.onAbortMerge,
+          ),
+          if (merge.conflicts.isNotEmpty) ...[
+            _SectionHeader(
+              top: 14,
+              label:
+                  '${translate('merge_conflicts')} · ${merge.conflicts.length}',
+              action: '',
+              onAction: null,
+            ),
+            for (final path in merge.conflicts)
+              _ConflictRow(
+                path: path,
+                selected: _selected?.path == path,
+                onTap: () => _select((path: path, staged: false)),
+                onResolve: busy || widget.onResolveConflict == null
+                    ? null
+                    : (side) => widget.onResolveConflict!(path, side),
+                onOpen: () {
+                  final entry = _statusOf(path);
+                  if (entry != null) widget.onOpenFile(entry);
+                },
+                onMarkResolved: busy
+                    ? null
+                    : () async {
+                        final entry = _statusOf(path);
+                        if (entry != null) await widget.onStage(entry);
+                      },
+              ),
+          ],
+        ],
         _SectionHeader(
           top: 18,
           label: '${translate('changes_staged')} · ${staged.length}',
@@ -425,9 +496,12 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
   Widget _buildCommitForm(BuildContext context) {
     final b = context.branchi;
     final branch = widget.branchName;
-    final commitLabel = branch == null || branch.isEmpty
-        ? translate('changes_commit')
-        : translate('changes_commit_to').replaceAll('{branch}', branch);
+    final merge = widget.mergeState;
+    final commitLabel = merge != null
+        ? translate(merge.isSquash ? 'merge_finish_squash' : 'merge_finish')
+        : branch == null || branch.isEmpty
+            ? translate('changes_commit')
+            : translate('changes_commit_to').replaceAll('{branch}', branch);
     final canCommit = _canCommit;
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
@@ -609,6 +683,175 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
       );
     }
     return UnifiedDiffView(diff: diff);
+  }
+}
+
+/// "Merging … · 2 files still have conflicts" with an Abort button.
+class _MergeBanner extends StatelessWidget {
+  const _MergeBanner({required this.state, required this.onAbort});
+
+  final MergeState state;
+  final Future<void> Function()? onAbort;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    final count = state.conflicts.length;
+    final title = state.message.split('\n').first;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: b.mod.withValues(alpha: 0.08),
+        border: Border.all(color: b.mod.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            count == 0 ? Icons.check_circle_outline : Icons.warning_amber,
+            size: 16,
+            color: count == 0 ? b.add : b.mod,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: b.fg, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  count == 0
+                      ? translate('merge_all_resolved')
+                      : translate('merge_conflicts_left')
+                          .replaceAll('{count}', '$count'),
+                  style: TextStyle(color: b.muted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: onAbort == null ? null : () => onAbort!(),
+            style: TextButton.styleFrom(foregroundColor: b.del),
+            child: Text(translate(
+              state.isSquash ? 'merge_abort_squash' : 'merge_abort',
+            )),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A conflicted file with "Use mine / Use theirs / Open".
+class _ConflictRow extends StatelessWidget {
+  const _ConflictRow({
+    required this.path,
+    required this.selected,
+    required this.onTap,
+    required this.onResolve,
+    required this.onOpen,
+    required this.onMarkResolved,
+  });
+
+  final String path;
+  final VoidCallback? onMarkResolved;
+  final bool selected;
+  final VoidCallback onTap;
+  final void Function(String side)? onResolve;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    Widget button(String label, VoidCallback? onPressed, {String? tip}) =>
+        Tooltip(
+          message: tip ?? '',
+          child: OutlinedButton(
+            onPressed: onPressed,
+            style: OutlinedButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 26),
+              textStyle: const TextStyle(fontSize: 11),
+              foregroundColor: b.fg,
+              side: BorderSide(color: b.line),
+            ),
+            child: Text(label),
+          ),
+        );
+    final slash = path.lastIndexOf('/');
+    return Material(
+      color: selected ? b.hover : Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        onDoubleTap: onOpen,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 6, 12, 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text('C',
+                      style: b.mono(fontSize: 11, color: b.del)
+                          .copyWith(fontWeight: FontWeight.w700)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text.rich(
+                      TextSpan(children: [
+                        TextSpan(text: path.substring(slash + 1)),
+                        if (slash > 0)
+                          TextSpan(
+                            text: '  ${path.substring(0, slash)}',
+                            style: TextStyle(color: b.muted, fontSize: 11),
+                          ),
+                      ]),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Padding(
+                padding: const EdgeInsets.only(left: 18),
+                child: Wrap(
+                  spacing: 6,
+                  children: [
+                    button(
+                      translate('merge_use_mine'),
+                      onResolve == null ? null : () => onResolve!('ours'),
+                      tip: translate('merge_use_mine_tip'),
+                    ),
+                    button(
+                      translate('merge_use_theirs'),
+                      onResolve == null ? null : () => onResolve!('theirs'),
+                      tip: translate('merge_use_theirs_tip'),
+                    ),
+                    button(
+                      translate('merge_open'),
+                      onOpen,
+                      tip: translate('merge_open_tip'),
+                    ),
+                    button(
+                      translate('merge_mark_resolved'),
+                      onMarkResolved,
+                      tip: translate('merge_mark_resolved_tip'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

@@ -663,3 +663,87 @@ mod tests {
         unsafe { branchi_free_string(err) };
     }
 }
+
+/// What merging branch `source` into the current branch would bring in, as
+/// `{"ok": MergePreview}` or `{"error": "..."}`.
+///
+/// # Safety
+/// `path` and `source` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_merge_preview(
+    path: *const c_char,
+    source: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let source = c_str_to_string(source);
+    let result = GitRepo::open(&path).and_then(|repo| repo.merge_preview(&source));
+    result_to_json_c_string(result)
+}
+
+/// Merges branch `source` into the current branch. `mode` is `merge`,
+/// `no_ff` or `squash`. Returns `{"ok": MergeOutcome}` or `{"error": "..."}`.
+///
+/// # Safety
+/// All arguments must be valid, NUL-terminated UTF-8 C strings that outlive
+/// the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_merge(
+    path: *const c_char,
+    source: *const c_char,
+    mode: *const c_char,
+    message: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let source = c_str_to_string(source);
+    let mode = c_str_to_string(mode);
+    let message = c_str_to_string(message);
+    let result = crate::merge::MergeMode::parse(&mode)
+        .and_then(|mode| GitRepo::open(&path).and_then(|repo| repo.merge(&source, mode, &message)));
+    result_to_json_c_string(result)
+}
+
+/// The merge waiting to be finished: `{"ok": MergeState}`, `{"ok": null}`
+/// when there is none, or `{"error": "..."}`.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
+/// call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_merge_state(path: *const c_char) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let result = GitRepo::open(&path).and_then(|repo| repo.merge_state());
+    result_to_json_c_string(result)
+}
+
+/// Aborts the merge in progress. Returns null on success or an error
+/// string.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
+/// call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_abort_merge(path: *const c_char) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let result = GitRepo::open(&path).and_then(|repo| repo.abort_merge());
+    result_to_c_string(result)
+}
+
+/// Resolves the conflict in `file` by taking `side` (`ours` or `theirs`)
+/// whole. Returns null on success or an error string.
+///
+/// # Safety
+/// All arguments must be valid, NUL-terminated UTF-8 C strings that outlive
+/// the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_resolve_conflict(
+    path: *const c_char,
+    file: *const c_char,
+    side: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let file = c_str_to_string(file);
+    let side = c_str_to_string(side);
+    let result = GitRepo::open(&path).and_then(|repo| repo.resolve_conflict(&file, &side));
+    result_to_c_string(result)
+}

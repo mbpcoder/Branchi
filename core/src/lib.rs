@@ -12,6 +12,7 @@ pub mod file_search;
 pub mod fs_ops;
 pub mod git;
 pub mod logging;
+pub mod merge;
 
 pub fn welcome_message() -> String {
     "Welcome to Branchi".to_string()

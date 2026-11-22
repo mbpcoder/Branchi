@@ -6,6 +6,7 @@ import '../theme/app_theme.dart';
 import 'branch_base_prefs.dart';
 import 'file_explorer.dart';
 import 'git_actions.dart';
+import 'merge.dart';
 import 'models.dart';
 import 'remotes_dialog.dart';
 
@@ -91,6 +92,7 @@ class BranchSidebar extends StatefulWidget {
     required this.isUpdatingCurrentBranch,
     required this.onUpdateCurrentBranch,
     this.onOpenInTerminal,
+    this.onMergeConflicts,
     this.width = 220,
   });
 
@@ -100,6 +102,10 @@ class BranchSidebar extends StatefulWidget {
   /// Opens a new built-in terminal tab in the repository folder. The menu
   /// item is hidden when this is null.
   final VoidCallback? onOpenInTerminal;
+
+  /// Called when a merge started here stopped on conflicts, so the caller
+  /// can show them (in Changes).
+  final VoidCallback? onMergeConflicts;
 
   /// Called after a branch action (checkout/create/delete/update) succeeds,
   /// so the caller can reload the repository's commits and branches.
@@ -393,7 +399,36 @@ class _BranchSidebarState extends State<BranchSidebar> {
     }
   }
 
+  /// Merges [source] into the current branch after asking how.
+  Future<void> _merge(String source) async {
+    final outcome = await showMergeDialog(
+      context,
+      repo: widget.repoPath,
+      source: source,
+    );
+    if (!mounted || outcome == null) return;
+    widget.onChanged();
+    if (outcome.result == 'conflicts') {
+      widget.onMergeConflicts?.call();
+    } else {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(translate(outcome.result == 'up_to_date'
+                  ? 'merge_done_up_to_date'
+                  : 'merge_done')
+              .replaceAll('{source}', source)),
+        ));
+    }
+  }
+
   Future<void> _showContextMenu(Offset position, BranchEntry branch) async {
+    final current = [
+      for (final b in widget.branches)
+        if (b.isHead) b.name,
+    ].firstOrNull;
+    final canMergeIn = current != null && !branch.isHead;
+    final base = branch.isHead && branch.baseBehind > 0 ? branch.base : null;
     final overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox;
     final action = await showMenu<String>(
@@ -405,6 +440,22 @@ class _BranchSidebarState extends State<BranchSidebar> {
       items: [
         const PopupMenuItem(value: 'checkout', child: Text('Checkout')),
         const PopupMenuItem(value: 'update', child: Text('Update')),
+        if (canMergeIn || base != null) const PopupMenuDivider(),
+        if (canMergeIn)
+          PopupMenuItem(
+            value: 'merge',
+            child: Text(translate('merge_menu')
+                .replaceAll('{source}', branch.name)
+                .replaceAll('{target}', current)),
+          ),
+        if (base != null)
+          PopupMenuItem(
+            value: 'merge_base',
+            child: Text(translate('merge_menu_update_from')
+                .replaceAll('{source}', _baseLabel(base) ?? base)
+                .replaceAll('{count}', '${branch.baseBehind}')),
+          ),
+        if (canMergeIn || base != null) const PopupMenuDivider(),
         if (!branch.isRemote)
           const PopupMenuItem(value: 'push', child: Text('Push')),
         const PopupMenuItem(value: 'delete', child: Text('Delete')),
@@ -420,6 +471,12 @@ class _BranchSidebarState extends State<BranchSidebar> {
         break;
       case 'push':
         await _push(branch);
+        break;
+      case 'merge':
+        await _merge(branch.name);
+        break;
+      case 'merge_base':
+        await _merge(base!);
         break;
       case 'delete':
         await _delete(branch);
