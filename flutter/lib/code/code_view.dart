@@ -9,6 +9,7 @@ import 'content_search_panel.dart';
 import 'file_languages.dart';
 import 'file_search_dialog.dart';
 import 'file_tree.dart';
+import 'line_blame.dart';
 
 const double _defaultTreeWidth = 260;
 const double _minTreeWidth = 160;
@@ -17,11 +18,20 @@ const double _maxTreeWidth = 480;
 /// The "Code" mode view: a sidebar on the left (the project file tree, or
 /// "search in files"), a tab-based code editor on the right.
 ///
-/// Ctrl/Cmd+P opens "go to file"; Ctrl/Cmd+Shift+F searches file contents.
+/// Ctrl/Cmd+P opens "go to file"; Ctrl/Cmd+Shift+F searches file contents;
+/// Ctrl/Cmd+Alt+B shows or hides line blame in the editor footer.
 class CodeView extends StatefulWidget {
-  const CodeView({super.key, required this.repoPath, this.onLanguageChanged});
+  const CodeView({
+    super.key,
+    required this.repoPath,
+    this.onLanguageChanged,
+    this.onOpenCommit,
+  });
 
   final String repoPath;
+
+  /// Opens a commit in the History view (from the editor footer's blame).
+  final ValueChanged<BlameHunk>? onOpenCommit;
 
   /// Forwarded to [CodeEditorPanel] so the app's bottom bar can show the
   /// active file's detected type.
@@ -112,6 +122,16 @@ class CodeViewState extends State<CodeView> {
           meta: true,
           shift: true,
         ): openContentSearch,
+        const SingleActivator(
+          LogicalKeyboardKey.keyB,
+          control: true,
+          alt: true,
+        ): BlameSettings.toggle,
+        const SingleActivator(
+          LogicalKeyboardKey.keyB,
+          meta: true,
+          alt: true,
+        ): BlameSettings.toggle,
       },
       child: Focus(
         focusNode: _viewFocus,
@@ -171,7 +191,9 @@ class CodeViewState extends State<CodeView> {
           Expanded(
             child: CodeEditorPanel(
               key: _editorKey,
+              repoRoot: widget.repoPath,
               onLanguageChanged: widget.onLanguageChanged,
+              onOpenCommit: widget.onOpenCommit,
             ),
           ),
         ],

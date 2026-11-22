@@ -136,7 +136,11 @@ class RepositoryViewState extends State<RepositoryView> {
     final current = _controller.section;
     _lastSection = current;
     if (previous != current) {
-      if (previous == RepoSection.files) widget.onLanguageChanged?.call(null);
+      if (previous == RepoSection.files) {
+        widget.onLanguageChanged?.call(null);
+        // Files edited in the editor change the working tree.
+        unawaited(_loadStatus());
+      }
       if (current == RepoSection.changes) {
         _selectedCommit = null;
         unawaited(_loadStatus());
@@ -166,6 +170,32 @@ class RepositoryViewState extends State<RepositoryView> {
               author: commit.author,
               email: commit.email,
               time: commit.time.toUtc(),
+              parentIds: const [],
+            ),
+    );
+  }
+
+  /// Switches to History with the commit [id] selected, e.g. from line
+  /// blame in the editor. The other fields describe it when it's older
+  /// than the loaded history.
+  void _showCommitById(
+    String id, {
+    required String summary,
+    required String author,
+    required String email,
+    DateTime? time,
+  }) {
+    _setSection(RepoSection.history);
+    final listed = _commits.where((c) => c.id == id);
+    _selectCommit(
+      listed.isNotEmpty
+          ? listed.first
+          : CommitEntry(
+              id: id,
+              summary: summary,
+              author: author,
+              email: email,
+              time: (time ?? DateTime.now()).toUtc(),
               parentIds: const [],
             ),
     );
@@ -445,6 +475,13 @@ class RepositoryViewState extends State<RepositoryView> {
     if (_section == RepoSection.files) {
       return CodeView(
         key: _codeViewKey,
+        onOpenCommit: (hunk) => _showCommitById(
+          hunk.commitId!,
+          summary: hunk.summary,
+          author: hunk.author,
+          email: hunk.email,
+          time: hunk.time,
+        ),
         repoPath: widget.path,
         onLanguageChanged: widget.onLanguageChanged,
       );

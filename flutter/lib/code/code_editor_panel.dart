@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
@@ -10,12 +11,14 @@ import 'package:re_highlight/styles/github-dark.dart';
 import 'package:re_highlight/styles/github.dart';
 
 import '../l10n/app_locale.dart';
+import '../repo/commit_list.dart' show formatRelativeTime;
 import '../theme/app_theme.dart';
 import 'file_languages.dart';
 import 'file_ops.dart';
 import 'file_preview.dart';
 import 'file_tree.dart' show fileTreeRefreshSignal;
 import 'language_picker.dart';
+import 'line_blame.dart';
 
 /// One open file in the editor's tab strip.
 class _OpenFile {
@@ -66,6 +69,16 @@ class _OpenFile {
   /// Bumped when a preview's file changes on disk, to redraw it.
   int previewVersion = 0;
 
+  /// Who last changed each line, for the footer; created on demand.
+  BlameRunner? blame;
+
+  void dispose() {
+    autoSaveTimer?.cancel();
+    blame?.dispose();
+    blame = null;
+    controller.dispose();
+  }
+
   /// Replaces the text with [text] from disk, keeping the cursor where it
   /// was as far as the new text allows, without marking the file dirty.
   void loadFromDisk(String text) {
@@ -100,9 +113,21 @@ Future<DateTime?> _modifiedOnDisk(String path) async {
 /// highlighting from `re_highlight` chosen by file name or extension (or
 /// picked by hand from the footer), plus previews for images and SVGs.
 class CodeEditorPanel extends StatefulWidget {
-  const CodeEditorPanel({super.key, this.initialFilePath, this.onLanguageChanged});
+  const CodeEditorPanel({
+    super.key,
+    this.initialFilePath,
+    this.onLanguageChanged,
+    this.repoRoot,
+    this.onOpenCommit,
+  });
 
   final String? initialFilePath;
+
+  /// The repository the files belong to, for blame in the footer.
+  final String? repoRoot;
+
+  /// Opens a commit (from the footer's blame) in the History view.
+  final ValueChanged<BlameHunk>? onOpenCommit;
 
   /// Called whenever the detected language of the active tab changes (e.g.
   /// "PHP", "TypeScript"), or with `null` when no file is open, so the app's
@@ -136,6 +161,8 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
     );
     FileLanguageOverrides.overrides.addListener(_onOverridesChanged);
     unawaited(FileLanguageOverrides.ensureLoaded());
+    BlameSettings.enabled.addListener(_onBlameSettingChanged);
+    unawaited(BlameSettings.ensureLoaded());
     if (widget.initialFilePath != null) {
       unawaited(openFile(widget.initialFilePath!));
     }
@@ -145,9 +172,45 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
     if (mounted) setState(() {});
   }
 
+  void _onBlameSettingChanged() {
+    if (!mounted) return;
+    if (!BlameSettings.enabled.value) {
+      for (final file in _open) {
+        file.blame?.dispose();
+        file.blame = null;
+      }
+    } else if (_activeIndex >= 0 && _activeIndex < _open.length) {
+      _refreshBlame(_open[_activeIndex]);
+    }
+    setState(() {});
+  }
+
+  /// Shows or hides who last changed the current line (Ctrl/Cmd+Alt+B).
+  void toggleBlame() => unawaited(BlameSettings.toggle());
+
+  /// (Re)computes blame for [file]'s current text in the background, if
+  /// blame is on and the file is in the repository.
+  void _refreshBlame(_OpenFile file) {
+    final root = widget.repoRoot;
+    if (!BlameSettings.enabled.value ||
+        root == null ||
+        file.kind != OpenFileKind.text) {
+      return;
+    }
+    final rel = repoRelativePath(root, file.path);
+    if (rel == null) return;
+    if (file.blame != null && file.blame!.relPath != rel) {
+      file.blame!.dispose();
+      file.blame = null;
+    }
+    final runner = file.blame ??= BlameRunner(repoRoot: root, relPath: rel);
+    runner.request(file.controller.text);
+  }
+
   @override
   void dispose() {
     FileLanguageOverrides.overrides.removeListener(_onOverridesChanged);
+    BlameSettings.enabled.removeListener(_onBlameSettingChanged);
     _diskTimer?.cancel();
     _editorFocus.dispose();
     for (final file in _open) {
@@ -162,7 +225,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
           // Nowhere left to report the error once the panel is gone.
         }
       }
-      file.controller.dispose();
+      file.dispose();
     }
     widget.onLanguageChanged?.call(null);
     super.dispose();
@@ -179,6 +242,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
     final existingIndex = _open.indexWhere((f) => f.path == path);
     if (existingIndex != -1) {
       setState(() => _activeIndex = existingIndex);
+      _refreshBlame(_open[existingIndex]);
       if (line != null) _revealPosition(_open[existingIndex], line, column, length);
       return;
     }
@@ -204,6 +268,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
         _activeIndex = _open.length - 1;
         _error = null;
       });
+      _refreshBlame(file);
       if (line != null) _revealPosition(file, line, column, length);
     } on FileSystemException catch (error) {
       if (!mounted) return;
@@ -274,9 +339,15 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
         } else {
           setState(() {
             file.loadFromDisk(text);
+        _refreshBlame(file);
             file.conflict = null;
           });
         }
+      }
+      // Pick up commits / checkouts made elsewhere for the shown file.
+      if (mounted && _activeIndex >= 0 && _activeIndex < _open.length) {
+        final active = _open[_activeIndex];
+        active.blame?.checkHead(active.controller.text);
       }
     } finally {
       _checkingDisk = false;
@@ -317,6 +388,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
       if (!mounted || !_open.contains(file)) return;
       setState(() {
         file.loadFromDisk(text);
+        _refreshBlame(file);
         file.diskModified = modified;
         file.conflict = null;
       });
@@ -360,6 +432,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
       if (!mounted || !_open.contains(file)) return;
       setState(() {
         file.loadFromDisk(text);
+        _refreshBlame(file);
         file.kind = OpenFileKind.text;
       });
     } catch (error) {
@@ -390,6 +463,9 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
           ? to
           : p.join(to, p.relative(file.path, from: from));
       if (file.conflict == _DiskConflict.deleted) file.conflict = null;
+      // Blame is per path; recompute for the new one when shown.
+      file.blame?.dispose();
+      file.blame = null;
       changed = true;
     }
     if (changed && mounted) setState(() {});
@@ -407,7 +483,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
     if (removed.isEmpty) return;
     for (final file in removed) {
       file.autoSaveTimer?.cancel();
-      file.controller.dispose();
+      file.dispose();
     }
     setState(() {
       _open.removeWhere(removed.contains);
@@ -450,6 +526,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
         file.diskModified = modified;
         file.conflict = null;
       });
+      _refreshBlame(file);
       fileTreeRefreshSignal.value++;
       return true;
     } catch (error) {
@@ -472,7 +549,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
     if (index == -1) return;
 
     file.autoSaveTimer?.cancel();
-    file.controller.dispose();
+    file.dispose();
     setState(() {
       _open.removeAt(index);
       if (_open.isEmpty) {
@@ -572,6 +649,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
                     onSelect: (i) {
                       setState(() => _activeIndex = i);
                       unawaited(checkDisk());
+                      _refreshBlame(_open[i]);
                     },
                     onClose: _closeTab,
                   ),
@@ -733,6 +811,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
           if (active.kind == OpenFileKind.text)
             _EditorFooter(
               file: active,
+              onOpenCommit: widget.onOpenCommit,
               languageLabel: fileTypeLabel,
               onPickLanguage: () => _pickLanguage(active),
             ),
@@ -749,9 +828,11 @@ class _EditorFooter extends StatelessWidget {
     required this.file,
     required this.languageLabel,
     required this.onPickLanguage,
+    this.onOpenCommit,
   });
 
   final _OpenFile file;
+  final ValueChanged<BlameHunk>? onOpenCommit;
   final String? languageLabel;
   final VoidCallback onPickLanguage;
 
@@ -777,7 +858,16 @@ class _EditorFooter extends StatelessWidget {
                 translate(file.isDirty ? 'editor_modified' : 'editor_saved'),
                 style: style,
               ),
-              const Spacer(),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _LineBlame(
+                  blame: file.blame?.blame,
+                  // 1-based; the footer rebuilds as the cursor moves.
+                  line: selection.extentIndex + 1,
+                  onOpenCommit: onOpenCommit,
+                ),
+              ),
+              const SizedBox(width: 16),
               Text(parts.join('  ·  '), style: style),
               if (languageLabel != null) ...[
                 Text('  ·  ', style: style),
@@ -800,6 +890,90 @@ class _EditorFooter extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+}
+
+/// "Alice, 3 months ago · Fix login" for the cursor's line; clicking it
+/// opens the commit in History.
+class _LineBlame extends StatelessWidget {
+  const _LineBlame({
+    required this.blame,
+    required this.line,
+    required this.onOpenCommit,
+  });
+
+  final ValueListenable<FileBlame?>? blame;
+  final int line;
+  final ValueChanged<BlameHunk>? onOpenCommit;
+
+  @override
+  Widget build(BuildContext context) {
+    final source = blame;
+    if (source == null) return const SizedBox.shrink();
+    return ValueListenableBuilder<FileBlame?>(
+      valueListenable: source,
+      builder: (context, value, _) {
+        final hunk = value?.at(line);
+        if (hunk == null) return const SizedBox.shrink();
+        final c = context.branchi;
+        final style = TextStyle(fontSize: 12, color: c.muted);
+        if (!hunk.isCommitted) {
+          return Text(
+            translate('blame_not_committed'),
+            style: style,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          );
+        }
+        final when = hunk.time == null
+            ? ''
+            : formatRelativeTime(hunk.time!, DateTime.now());
+        final label = [
+          hunk.author,
+          if (when.isNotEmpty) when,
+        ].join(', ');
+        final tooltip = [
+          '${hunk.commitId!.substring(0, 8)}  ${hunk.author} <${hunk.email}>',
+          if (hunk.time != null) hunk.time!.toString().substring(0, 16),
+          hunk.summary,
+          '',
+          translate('blame_open_in_history'),
+        ].join('\n');
+        return Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: Tooltip(
+            message: tooltip,
+            waitDuration: const Duration(milliseconds: 400),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: onOpenCommit == null ? null : () => onOpenCommit!(hunk),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.history, size: 13, color: c.muted),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text.rich(
+                        TextSpan(children: [
+                          TextSpan(text: label),
+                          if (hunk.summary.isNotEmpty)
+                            TextSpan(text: '  ·  ${hunk.summary}'),
+                        ]),
+                        style: style,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

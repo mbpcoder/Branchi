@@ -41,6 +41,21 @@ pub struct CommitInfo {
     pub parent_ids: Vec<String>,
 }
 
+/// A run of lines last changed by the same commit, from [`GitRepo::blame`].
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct BlameHunk {
+    /// 1-based first line in the blamed text.
+    pub start_line: usize,
+    pub lines: usize,
+    /// None for lines that aren't committed yet.
+    pub commit_id: Option<String>,
+    /// Author with `.mailmap` applied; empty when uncommitted.
+    pub author: String,
+    pub email: String,
+    pub time: Option<DateTime<Utc>>,
+    pub summary: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct BranchInfo {
     pub name: String,
@@ -1043,6 +1058,101 @@ impl GitRepo {
         })
     }
 
+    /// Who last changed each line of `rel_path` (relative to the repo root,
+    /// `/`-separated). With `contents`, blames that text instead of the
+    /// committed file, so uncommitted edits show as uncommitted lines and
+    /// the line numbers match what the editor shows.
+    pub fn blame(&self, rel_path: &str, contents: Option<&str>) -> Result<Vec<BlameHunk>> {
+        let line_count = |text: &str| text.lines().count().max(1);
+        let uncommitted = |lines: usize| BlameHunk {
+            start_line: 1,
+            lines,
+            commit_id: None,
+            author: String::new(),
+            email: String::new(),
+            time: None,
+            summary: String::new(),
+        };
+
+        // A new file (or an empty repository) has no history to blame.
+        let tracked = self
+            .repo
+            .head()
+            .ok()
+            .and_then(|head| head.peel_to_tree().ok())
+            .is_some_and(|tree| tree.get_path(Path::new(rel_path)).is_ok());
+        if !tracked {
+            let lines = match contents {
+                Some(text) => line_count(text),
+                None => {
+                    let workdir = self.repo.workdir().context("bare repository")?;
+                    line_count(&std::fs::read_to_string(workdir.join(rel_path))?)
+                }
+            };
+            return Ok(vec![uncommitted(lines)]);
+        }
+
+        let mut options = git2::BlameOptions::new();
+        options.use_mailmap(true);
+        let blame = self
+            .repo
+            .blame_file(Path::new(rel_path), Some(&mut options))
+            .with_context(|| format!("failed to blame {rel_path}"))?;
+        let blame = match contents {
+            Some(text) => blame.blame_buffer(text.as_bytes())?,
+            None => blame,
+        };
+
+        // Author and summary come from the commit itself, not the hunk: after
+        // `blame_buffer`, split hunks can carry no signature at all (git2
+        // then dereferences a null pointer).
+        let mailmap = self.repo.mailmap().ok();
+        type CommitInfoParts = (String, String, Option<DateTime<Utc>>, String);
+        let mut commits = std::collections::HashMap::<git2::Oid, CommitInfoParts>::new();
+        let mut hunks = Vec::with_capacity(blame.len());
+        for hunk in blame.iter() {
+            let id = hunk.final_commit_id();
+            let start_line = hunk.final_start_line();
+            let lines = hunk.lines_in_hunk();
+            if id.is_zero() {
+                hunks.push(BlameHunk {
+                    start_line,
+                    lines,
+                    ..uncommitted(lines)
+                });
+                continue;
+            }
+            let (author, email, time, summary) = commits
+                .entry(id)
+                .or_insert_with(|| {
+                    let Ok(commit) = self.repo.find_commit(id) else {
+                        return Default::default();
+                    };
+                    let summary = commit.summary().unwrap_or_default().to_string();
+                    match Self::mapped_author(&commit, mailmap.as_ref()) {
+                        Ok(sig) => (
+                            sig.name().unwrap_or_default().to_string(),
+                            sig.email().unwrap_or_default().to_string(),
+                            DateTime::<Utc>::from_timestamp(sig.when().seconds(), 0),
+                            summary,
+                        ),
+                        Err(_) => (String::new(), String::new(), None, summary),
+                    }
+                })
+                .clone();
+            hunks.push(BlameHunk {
+                start_line,
+                lines,
+                commit_id: Some(id.to_string()),
+                author,
+                email,
+                time,
+                summary,
+            });
+        }
+        Ok(hunks)
+    }
+
     /// A commit's author with the repository's `.mailmap` applied (so one
     /// person's old names and emails count as one author).
     fn mapped_author(
@@ -1267,6 +1377,55 @@ mod tests {
 
     fn write_file(dir: &Path, name: &str, contents: &str) {
         fs::write(dir.join(name), contents).unwrap();
+    }
+
+    #[test]
+    fn blame_reports_commits_and_uncommitted_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        write_file(dir.path(), "a.txt", "one\ntwo\n");
+        repo.stage("a.txt").unwrap();
+        let first = repo.commit("first", "Alice", "alice@example.com").unwrap();
+        write_file(dir.path(), "a.txt", "one\ntwo\nthree\n");
+        repo.stage("a.txt").unwrap();
+        let second = repo.commit("add three", "Bob", "bob@example.com").unwrap();
+
+        let hunks = repo.blame("a.txt", None).unwrap();
+        assert_eq!(hunks.len(), 2);
+        assert_eq!(hunks[0].start_line, 1);
+        assert_eq!(hunks[0].lines, 2);
+        assert_eq!(hunks[0].commit_id.as_deref(), Some(first.as_str()));
+        assert_eq!(hunks[0].author, "Alice");
+        assert_eq!(hunks[0].summary, "first");
+        assert_eq!(hunks[1].start_line, 3);
+        assert_eq!(hunks[1].commit_id.as_deref(), Some(second.as_str()));
+
+        // Unsaved/uncommitted edits: a new first line shifts the rest down.
+        let hunks = repo
+            .blame("a.txt", Some("zero\none\ntwo\nthree\n"))
+            .unwrap();
+        assert_eq!(hunks[0].start_line, 1);
+        assert_eq!(hunks[0].commit_id, None);
+        let line3 = hunks
+            .iter()
+            .find(|h| h.start_line <= 3 && 3 < h.start_line + h.lines)
+            .unwrap();
+        assert_eq!(line3.author, "Alice");
+
+        // A line inserted in the middle splits a committed hunk; the split
+        // parts must still report their commit (this used to crash).
+        let hunks = repo
+            .blame("a.txt", Some("one\ninserted\ntwo\nthree\n"))
+            .unwrap();
+        let authors: Vec<_> = hunks.iter().map(|h| h.author.as_str()).collect();
+        assert_eq!(authors, vec!["Alice", "", "Alice", "Bob"]);
+
+        // Untracked file: all uncommitted.
+        write_file(dir.path(), "new.txt", "x\ny\n");
+        let hunks = repo.blame("new.txt", None).unwrap();
+        assert_eq!(hunks.len(), 1);
+        assert_eq!(hunks[0].lines, 2);
+        assert_eq!(hunks[0].commit_id, None);
     }
 
     #[test]

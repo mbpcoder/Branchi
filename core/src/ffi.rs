@@ -572,6 +572,27 @@ pub unsafe extern "C" fn branchi_search_content(
     ))
 }
 
+/// Blames `rel_path` (relative to the repo at `path`, `/`-separated).
+/// `contents` may be null to blame the committed file, or the editor's
+/// text so uncommitted lines show as such. Returns
+/// `{"ok": [BlameHunk, ...]}` or `{"error": "..."}`.
+///
+/// # Safety
+/// `path` and `rel_path` must be valid, NUL-terminated UTF-8 C strings,
+/// and `contents` null or one, all outliving the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_blame(
+    path: *const c_char,
+    rel_path: *const c_char,
+    contents: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let rel_path = c_str_to_string(rel_path);
+    let contents = (!contents.is_null()).then(|| c_str_to_string(contents));
+    let result = GitRepo::open(&path).and_then(|repo| repo.blame(&rel_path, contents.as_deref()));
+    result_to_json_c_string(result)
+}
+
 /// Releases a string previously returned by one of this module's
 /// functions. Safe to call with a null pointer (no-op).
 ///

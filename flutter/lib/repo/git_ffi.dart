@@ -64,6 +64,17 @@ typedef _SearchContentDart = Pointer<Utf8> Function(
   int maxMatches,
 );
 
+typedef _BlameNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> relPath,
+  Pointer<Utf8> contents,
+);
+typedef _BlameDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> relPath,
+  Pointer<Utf8> contents,
+);
+
 typedef _IsRepositoryNative = Bool Function(Pointer<Utf8> path);
 typedef _IsRepositoryDart = bool Function(Pointer<Utf8> path);
 
@@ -359,6 +370,7 @@ class GitFfi {
             _GlobalConfigGetDart>('branchi_global_config_get'),
         _globalConfigSet = lib.lookupFunction<_GlobalConfigSetNative,
             _GlobalConfigSetDart>('branchi_global_config_set'),
+        _blame = lib.lookupFunction<_BlameNative, _BlameDart>('branchi_blame'),
         _searchContent =
             lib.lookupFunction<_SearchContentNative, _SearchContentDart>(
           'branchi_search_content',
@@ -423,6 +435,7 @@ class GitFfi {
   final _MoveToTrashDart _moveToTrash;
   final _FindFilesDart _findFiles;
   final _SearchContentDart _searchContent;
+  final _BlameDart _blame;
   final _FreeStringDart _freeString;
 
   /// Runs `git init` at [path] via the Rust core. Returns null on success,
@@ -524,6 +537,23 @@ class GitFfi {
     } finally {
       malloc.free(rootPtr);
       malloc.free(queryPtr);
+    }
+  }
+
+  /// Blames [relPath] in the repository at [path]. With [contents], blames
+  /// that text (e.g. the editor's) instead of the committed file. Each item
+  /// is a hunk: `{"start_line", "lines", "commit_id", "author", "email",
+  /// "time", "summary"}`. Throws [GitFfiException] on failure.
+  List<dynamic> blame(String path, String relPath, {String? contents}) {
+    final pathPtr = path.toNativeUtf8();
+    final relPtr = relPath.toNativeUtf8();
+    final contentsPtr = contents?.toNativeUtf8() ?? nullptr;
+    try {
+      return _consumeJsonList(_blame(pathPtr, relPtr, contentsPtr));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(relPtr);
+      if (contentsPtr != nullptr) malloc.free(contentsPtr);
     }
   }
 
