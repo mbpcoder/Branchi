@@ -81,6 +81,13 @@ pub struct BranchInfo {
     /// When the branch's tip commit was made (committer time), for sorting
     /// by recent activity. Git doesn't record when a branch was created.
     pub last_commit_time: Option<DateTime<Utc>>,
+    /// For a local branch: the remote branch it corresponds to - its
+    /// upstream, else a same-named branch on a remote (`origin` first).
+    pub remote_counterpart: Option<String>,
+    /// Commits on this local branch that its counterpart doesn't have (to
+    /// push), and the reverse (to pull). 0 without a counterpart.
+    pub ahead: usize,
+    pub behind: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -494,16 +501,71 @@ impl GitRepo {
                 .ok()
                 .and_then(|c| DateTime::<Utc>::from_timestamp(c.time().seconds(), 0));
 
+            let (remote_counterpart, ahead, behind) = if is_remote {
+                (None, 0, 0)
+            } else {
+                self.remote_counterpart(&branch, &name)
+            };
+
             result.push(BranchInfo {
                 name,
                 is_head,
                 is_remote,
                 merged_into,
                 last_commit_time,
+                remote_counterpart,
+                ahead,
+                behind,
             });
         }
 
         Ok(result)
+    }
+
+    /// The remote branch matching local branch `name` and how far apart
+    /// they are: its upstream if set, else `<remote>/<name>` on the first
+    /// remote that has it (`origin` first).
+    fn remote_counterpart(
+        &self,
+        branch: &git2::Branch,
+        name: &str,
+    ) -> (Option<String>, usize, usize) {
+        let upstream = branch
+            .upstream()
+            .ok()
+            .and_then(|u| u.name().ok().flatten().map(str::to_string));
+        let counterpart = upstream.or_else(|| {
+            let mut remotes: Vec<String> = self
+                .repo
+                .remotes()
+                .ok()?
+                .iter()
+                .flatten()
+                .map(str::to_string)
+                .collect();
+            remotes.sort_by_key(|r| r != "origin");
+            remotes
+                .into_iter()
+                .map(|r| format!("{r}/{name}"))
+                .find(|candidate| {
+                    self.repo
+                        .find_branch(candidate, git2::BranchType::Remote)
+                        .is_ok()
+                })
+        });
+        let Some(counterpart) = counterpart else {
+            return (None, 0, 0);
+        };
+        let tips = branch.get().target().zip(
+            self.repo
+                .find_branch(&counterpart, git2::BranchType::Remote)
+                .ok()
+                .and_then(|b| b.get().target()),
+        );
+        let (ahead, behind) = tips
+            .and_then(|(local, remote)| self.repo.graph_ahead_behind(local, remote).ok())
+            .unwrap_or((0, 0));
+        (Some(counterpart), ahead, behind)
     }
 
     /// The branch other branches are checked against for "already merged":
@@ -2060,7 +2122,30 @@ mod tests {
                 .collect()
         };
         assert!(remote_names(&local_repo).contains(&"origin/feature".to_string()));
-        assert!(local_repo.branches().unwrap()[0].last_commit_time.is_some());
+        let main = local_repo
+            .branches()
+            .unwrap()
+            .into_iter()
+            .find(|b| !b.is_remote)
+            .unwrap();
+        assert!(main.last_commit_time.is_some());
+        assert_eq!(
+            main.remote_counterpart.as_deref(),
+            Some(format!("origin/{}", main.name).as_str())
+        );
+        assert_eq!((main.ahead, main.behind), (0, 0));
+        write_file(local_dir.path(), "b.txt", "local");
+        local_repo.stage("b.txt").unwrap();
+        local_repo
+            .commit("local", "Test User", "t@example.com")
+            .unwrap();
+        let main = local_repo
+            .branches()
+            .unwrap()
+            .into_iter()
+            .find(|b| !b.is_remote)
+            .unwrap();
+        assert_eq!((main.ahead, main.behind), (1, 0));
 
         remote_repo
             .repo

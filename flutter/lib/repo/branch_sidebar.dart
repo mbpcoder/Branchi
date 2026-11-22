@@ -324,8 +324,18 @@ class _BranchSidebarState extends State<BranchSidebar> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete branch'),
-        content: Text('Delete branch "${branch.name}"?'),
+        title: Text(
+          branch.isRemote
+              ? translate('branch_delete_remote_title')
+                  .replaceAll('{remote}', branch.name.split('/').first)
+              : 'Delete branch',
+        ),
+        content: Text(
+          branch.isRemote
+              ? translate('branch_delete_remote_body')
+                  .replaceAll('{branch}', branch.name)
+              : 'Delete branch "${branch.name}"?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -504,9 +514,19 @@ class _BranchSidebarState extends State<BranchSidebar> {
       _sort,
     );
 
-    // Group remote branches by remote name ("origin/main" -> "origin").
+    // Remote branches that a local branch already stands for are shown on
+    // that local row (cloud + ahead/behind), so only the rest are listed,
+    // grouped by remote ("origin/main" -> "origin").
+    final represented = {
+      for (final branch in widget.branches)
+        if (!branch.isRemote && branch.remoteCounterpart != null)
+          branch.remoteCounterpart!,
+    };
     final remotesByName = <String, List<BranchEntry>>{};
     for (final branch in remote) {
+      if (represented.contains(branch.name) || branch.name.endsWith('/HEAD')) {
+        continue;
+      }
       final slash = branch.name.indexOf('/');
       final remoteName = slash == -1 ? '' : branch.name.substring(0, slash);
       remotesByName.putIfAbsent(remoteName, () => []).add(branch);
@@ -521,7 +541,8 @@ class _BranchSidebarState extends State<BranchSidebar> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
         children: [
           _SectionHeader(
-            title: 'Branches',
+            title: translate('branches_local'),
+            icon: Icons.laptop_outlined,
             expanded: _localExpanded,
             onToggle: () => setState(() => _localExpanded = !_localExpanded),
             trailing: Row(
@@ -602,23 +623,31 @@ class _BranchSidebarState extends State<BranchSidebar> {
             ),
           if (_localExpanded)
             for (final branch in local) _buildBranchRow(branch),
-          if (remote.isNotEmpty) ...[
-            const SizedBox(height: 24),
+          if (remotesByName.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 12, 8, 12),
+              child: Divider(height: 1, thickness: 1, color: b.line),
+            ),
             for (final entry in remotesByName.entries) ...[
               _SectionHeader(
-                title: entry.key.isEmpty
-                    ? 'Remote'
-                    : 'Remote · ${entry.key}',
+                title: translate('branches_only_on_remote')
+                    .replaceAll('{remote}', entry.key),
+                icon: Icons.cloud_outlined,
+                count: entry.value.length,
                 expanded: _remoteExpanded,
                 onToggle: () =>
                     setState(() => _remoteExpanded = !_remoteExpanded),
               ),
               if (_remoteExpanded)
-                for (final branch in entry.value)
-                  _buildBranchRow(
-                    branch,
-                    label: _shortRemoteName(branch.name),
-                  ),
+                _RemoteOnlyBox(
+                  children: [
+                    for (final branch in entry.value)
+                      _buildBranchRow(
+                        branch,
+                        label: _shortRemoteName(branch.name),
+                      ),
+                  ],
+                ),
               if (entry.key != remotesByName.keys.last)
                 const SizedBox(height: 16),
             ],
@@ -635,9 +664,13 @@ class _SectionHeader extends StatefulWidget {
     required this.expanded,
     required this.onToggle,
     this.trailing,
+    this.icon,
+    this.count,
   });
 
   final String title;
+  final IconData? icon;
+  final int? count;
   final bool expanded;
   final VoidCallback onToggle;
   final Widget? trailing;
@@ -668,6 +701,10 @@ class _SectionHeaderState extends State<_SectionHeader> {
                   onTap: widget.onToggle,
                   child: Row(
                     children: [
+                      if (widget.icon != null) ...[
+                        Icon(widget.icon, size: 13, color: b.muted),
+                        const SizedBox(width: 6),
+                      ],
                       Flexible(
                         child: Text(
                           widget.title,
@@ -695,6 +732,14 @@ class _SectionHeaderState extends State<_SectionHeader> {
                 ),
               ),
             ),
+            if (widget.count != null)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  '${widget.count}',
+                  style: TextStyle(fontSize: 11, color: b.muted),
+                ),
+              ),
             if (widget.trailing != null) widget.trailing!,
           ],
         ),
@@ -807,9 +852,26 @@ class _BranchTile extends StatelessWidget {
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
                 child: Row(
                   children: [
+                    if (!branch.isRemote) ...[
+                      Icon(
+                        Icons.call_split,
+                        size: 13,
+                        color: current ? b.accent : b.muted,
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     Expanded(
-                      child: Text(
-                        label,
+                      child: Text.rich(
+                        TextSpan(children: [
+                          // Remote rows always say where they live.
+                          if (branch.isRemote && label != branch.name)
+                            TextSpan(
+                              text: branch.name
+                                  .substring(0, branch.name.length - label.length),
+                              style: TextStyle(color: b.off),
+                            ),
+                          TextSpan(text: label),
+                        ]),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -826,17 +888,7 @@ class _BranchTile extends StatelessWidget {
                       const SizedBox(width: 6),
                       _MergedBadge(branch: branch),
                     ],
-                    if (current) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: b.accent,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ],
+                    if (!branch.isRemote) _SyncState(branch: branch),
                   ],
                 ),
               ),
@@ -904,4 +956,123 @@ class _MergedBadge extends StatelessWidget {
       ),
     );
   }
+}
+
+
+/// Trailing part of a local branch row: commits to push (↑) / pull (↓),
+/// and a cloud when the branch also exists on a remote.
+class _SyncState extends StatelessWidget {
+  const _SyncState({required this.branch});
+
+  final BranchEntry branch;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    final counterpart = branch.remoteCounterpart;
+    if (counterpart == null) {
+      return Tooltip(
+        message: translate('branch_local_only'),
+        child: Padding(
+          padding: const EdgeInsets.only(left: 6),
+          child: Icon(Icons.cloud_off_outlined, size: 13, color: b.off),
+        ),
+      );
+    }
+    final mono = b.mono(fontSize: 11, color: b.muted);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (branch.ahead > 0)
+          Tooltip(
+            message: translate('branch_ahead')
+                .replaceAll('{n}', '${branch.ahead}')
+                .replaceAll('{remote}', counterpart),
+            child: Padding(
+              padding: const EdgeInsets.only(left: 6),
+              child: Text('↑${branch.ahead}', style: mono.copyWith(color: b.add)),
+            ),
+          ),
+        if (branch.behind > 0)
+          Tooltip(
+            message: translate('branch_behind')
+                .replaceAll('{n}', '${branch.behind}')
+                .replaceAll('{remote}', counterpart),
+            child: Padding(
+              padding: const EdgeInsets.only(left: 6),
+              child:
+                  Text('↓${branch.behind}', style: mono.copyWith(color: b.accent)),
+            ),
+          ),
+        Tooltip(
+          message: translate('branch_on_remote').replaceAll('{remote}', counterpart),
+          child: Padding(
+            padding: const EdgeInsets.only(left: 6),
+            child: Icon(Icons.cloud_outlined, size: 13, color: b.muted),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Dashed box around branches that exist only on a remote, so they can't
+/// be mistaken for local ones.
+class _RemoteOnlyBox extends StatelessWidget {
+  const _RemoteOnlyBox({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    return CustomPaint(
+      painter: _DashedBorderPainter(color: b.off),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(2, 6, 2, 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ...children,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 2, 8, 2),
+              child: Text(
+                translate('branches_remote_hint'),
+                style: TextStyle(fontSize: 11, color: b.muted),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DashedBorderPainter extends CustomPainter {
+  _DashedBorderPainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    final path = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          Offset.zero & size,
+          const Radius.circular(8),
+        ).deflate(0.5),
+      );
+    for (final metric in path.computeMetrics()) {
+      for (var d = 0.0; d < metric.length; d += 7) {
+        canvas.drawPath(metric.extractPath(d, d + 4), paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedBorderPainter old) => old.color != color;
 }

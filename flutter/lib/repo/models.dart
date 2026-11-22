@@ -63,6 +63,9 @@ class BranchEntry {
     required this.isRemote,
     this.mergedInto,
     this.lastCommitTime,
+    this.remoteCounterpart,
+    this.ahead = 0,
+    this.behind = 0,
   });
 
   factory BranchEntry.fromJson(Map<String, dynamic> json) {
@@ -73,6 +76,9 @@ class BranchEntry {
       isRemote: json['is_remote'] as bool,
       mergedInto: json['merged_into'] as String?,
       lastCommitTime: time == null ? null : DateTime.parse(time),
+      remoteCounterpart: json['remote_counterpart'] as String?,
+      ahead: json['ahead'] as int? ?? 0,
+      behind: json['behind'] as int? ?? 0,
     );
   }
 
@@ -86,6 +92,14 @@ class BranchEntry {
 
   /// When the branch's latest commit was made; used to sort by activity.
   final DateTime? lastCommitTime;
+
+  /// For a local branch: the matching remote branch (its upstream, else a
+  /// same-named one, e.g. `origin/main`), or null if it's only local.
+  final String? remoteCounterpart;
+
+  /// Commits to push to / pull from [remoteCounterpart].
+  final int ahead;
+  final int behind;
 
   bool get isMerged => mergedInto != null;
 }
