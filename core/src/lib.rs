@@ -5,6 +5,7 @@
 //! into the app (e.g. via `flutter_rust_bridge`), the same way RustDesk
 //! splits its `libs/` core from its `flutter/` UI.
 
+pub mod content_search;
 pub mod db;
 pub mod ffi;
 pub mod file_search;

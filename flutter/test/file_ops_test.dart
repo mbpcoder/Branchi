@@ -1,9 +1,11 @@
 import 'dart:io';
 
 import 'package:branchi/code/file_languages.dart';
+import 'package:branchi/code/file_search_dialog.dart';
 import 'package:branchi/code/file_ops.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   late Directory root;
@@ -134,6 +136,47 @@ void main() {
         expect(lang, isNotNull, reason: name);
         expect(keys, contains(lang!.grammar), reason: name);
       }
+    });
+  });
+
+  group('create', () {
+    test('creates files, folders and nested paths', () async {
+      final file = await FileOps.create(root.path, 'a.txt', isDir: false);
+      expect(File(file).existsSync(), isTrue);
+      final nested =
+          await FileOps.create(root.path, 'src/util/b.dart', isDir: false);
+      expect(nested, path('src/util/b.dart'));
+      expect(File(nested).existsSync(), isTrue);
+      final dir = await FileOps.create(root.path, 'docs', isDir: true);
+      expect(Directory(dir).existsSync(), isTrue);
+    });
+
+    test('rejects empty, dot and existing names', () {
+      write('a.txt');
+      expect(FileOps.validateNewEntry(root.path, '  '), isNotNull);
+      expect(FileOps.validateNewEntry(root.path, '../x'), isNotNull);
+      expect(FileOps.validateNewEntry(root.path, 'a.txt'), isNotNull);
+      expect(FileOps.validateNewEntry(root.path, 'b.txt'), isNull);
+    });
+  });
+
+  group('RecentFiles', () {
+    test('keeps newest first, follows moves and drops missing files',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      write('a.txt');
+      write('b.txt');
+      await RecentFiles.record(root.path, path('a.txt'));
+      await RecentFiles.record(root.path, path('b.txt'));
+      await RecentFiles.record(root.path, path('a.txt'));
+      expect(await RecentFiles.forRoot(root.path), ['a.txt', 'b.txt']);
+
+      File(path('a.txt')).renameSync(path('c.txt'));
+      await RecentFiles.movePath(root.path, path('a.txt'), path('c.txt'));
+      expect(await RecentFiles.forRoot(root.path), ['c.txt', 'b.txt']);
+
+      File(path('b.txt')).deleteSync();
+      expect(await RecentFiles.forRoot(root.path), ['c.txt']);
     });
   });
 }

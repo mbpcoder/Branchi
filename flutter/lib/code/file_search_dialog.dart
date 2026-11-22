@@ -1,17 +1,102 @@
+import 'dart:convert';
+import 'dart:io';
 import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/app_locale.dart';
 import '../repo/git_ffi.dart';
 import '../theme/app_theme.dart';
 
+/// Recently opened files per repository, newest first, shown at the top
+/// of "go to file" before anything is typed.
+class RecentFiles {
+  RecentFiles._();
+
+  static const _prefsKey = 'editor_recent_files';
+  static const _maxPerRepo = 20;
+
+  /// Repository root -> relative paths (`/`-separated), newest first.
+  static Map<String, List<String>>? _cache;
+
+  static Future<Map<String, List<String>>> _load() async {
+    if (_cache != null) return _cache!;
+    final result = <String, List<String>>{};
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefsKey);
+      if (raw != null) {
+        final decoded = jsonDecode(raw) as Map<String, dynamic>;
+        for (final entry in decoded.entries) {
+          result[entry.key] = (entry.value as List).cast<String>();
+        }
+      }
+    } catch (_) {
+      // Start fresh if the saved list is unreadable.
+    }
+    return _cache = result;
+  }
+
+  static Future<void> _save() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefsKey, jsonEncode(_cache));
+    } catch (_) {
+      // Kept in memory for this run.
+    }
+  }
+
+  static String? _relative(String root, String path) {
+    if (!p.isWithin(root, path)) return null;
+    return p.split(p.relative(path, from: root)).join('/');
+  }
+
+  /// Notes that [path] (absolute, inside [root]) was just opened.
+  static Future<void> record(String root, String path) async {
+    final rel = _relative(root, path);
+    if (rel == null) return;
+    final all = await _load();
+    final list = all.putIfAbsent(root, () => [])
+      ..remove(rel)
+      ..insert(0, rel);
+    if (list.length > _maxPerRepo) list.removeRange(_maxPerRepo, list.length);
+    await _save();
+  }
+
+  /// Keeps entries pointing at files after [from] moved to [to].
+  static Future<void> movePath(String root, String from, String to) async {
+    final all = await _load();
+    final list = all[root];
+    final fromRel = _relative(root, from);
+    final toRel = _relative(root, to);
+    if (list == null || fromRel == null || toRel == null) return;
+    var changed = false;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] == fromRel || list[i].startsWith('$fromRel/')) {
+        list[i] = toRel + list[i].substring(fromRel.length);
+        changed = true;
+      }
+    }
+    if (changed) await _save();
+  }
+
+  /// Recently opened files under [root] that still exist, newest first.
+  static Future<List<String>> forRoot(String root) async {
+    final all = await _load();
+    return [
+      for (final rel in all[root] ?? const <String>[])
+        if (File(p.joinAll([root, ...rel.split('/')])).existsSync()) rel,
+    ];
+  }
+}
+
 /// One search result: a path relative to the root, and which of its
 /// characters matched the query.
 class _Match {
-  _Match(this.path, this.positions);
+  _Match(this.path, this.positions, {this.isRecent = false});
 
   factory _Match.fromJson(Map<String, dynamic> json) => _Match(
         json['path'] as String,
@@ -20,6 +105,9 @@ class _Match {
 
   final String path;
   final Set<int> positions;
+
+  /// Shown because it was opened recently (empty query).
+  final bool isRecent;
 }
 
 /// Runs the search off the UI thread. Top-level, so the isolate closure
@@ -99,12 +187,20 @@ class _FileSearchDialogState extends State<_FileSearchDialog> {
     _indexed = true;
     try {
       final raw = await _findFilesInIsolate(ffi, root, query, refresh);
+      // Before anything is typed, recently opened files come first.
+      final recent = query.trim().isEmpty
+          ? await RecentFiles.forRoot(root)
+          : const <String>[];
       if (!mounted || generation != _generation) return;
+      final recentSet = recent.toSet();
       setState(() {
-        _results = raw
-            .cast<Map<String, dynamic>>()
-            .map(_Match.fromJson)
-            .toList();
+        _results = [
+          for (final rel in recent) _Match(rel, const {}, isRecent: true),
+          ...raw
+              .cast<Map<String, dynamic>>()
+              .map(_Match.fromJson)
+              .where((m) => !recentSet.contains(m.path)),
+        ].take(_limit).toList();
         _highlighted = 0;
         _error = null;
       });
@@ -254,7 +350,16 @@ class _ResultRow extends StatelessWidget {
         color: highlighted ? c.hover : null,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         alignment: AlignmentDirectional.centerStart,
-        child: Text.rich(
+        child: Row(
+          children: [
+            if (match.isRecent) ...[
+              Tooltip(
+                message: translate('file_search_recent'),
+                child: Icon(Icons.history, size: 14, color: c.muted),
+              ),
+              const SizedBox(width: 8),
+            ],
+            Expanded(child: Text.rich(
           TextSpan(children: [
             ...spans(nameCharStart, chars.length, nameStyle),
             if (dir.isNotEmpty) TextSpan(text: '   ', style: dirStyle),
@@ -263,6 +368,8 @@ class _ResultRow extends StatelessWidget {
           ]),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
+        )),
+          ],
         ),
       ),
     );

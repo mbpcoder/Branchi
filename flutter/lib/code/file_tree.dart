@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../l10n/app_locale.dart';
+import '../repo/file_explorer.dart';
 import '../repo/git_actions.dart';
 import '../repo/models.dart';
 import '../theme/app_theme.dart';
@@ -18,9 +19,10 @@ final ValueNotifier<int> fileTreeRefreshSignal = ValueNotifier<int>(0);
 /// A lazily-expanded directory tree rooted at [rootPath], skipping `.git`.
 /// Selecting a file calls [onOpenFile] with its absolute path.
 ///
-/// Files and folders can be cut, copied, pasted, renamed and moved to the
-/// trash from the right-click menu or with the usual shortcuts while the
-/// tree has focus (Ctrl/Cmd+X/C/V, F2, Delete).
+/// Files and folders can be created, cut, copied, pasted, renamed and moved
+/// to the trash from the right-click menu or with the usual shortcuts while
+/// the tree has focus (Ctrl/Cmd+X/C/V, F2, Delete), and moved by dragging
+/// them onto a folder.
 class FileTree extends StatefulWidget {
   const FileTree({
     super.key,
@@ -32,6 +34,7 @@ class FileTree extends StatefulWidget {
     this.onPathMoved,
     this.onPathDeleted,
     this.onSearch,
+    this.onSearchContent,
   });
 
   final String rootPath;
@@ -52,6 +55,9 @@ class FileTree extends StatefulWidget {
   /// Opens the "go to file" search.
   final VoidCallback? onSearch;
 
+  /// Switches the sidebar to "search in files".
+  final VoidCallback? onSearchContent;
+
   @override
   State<FileTree> createState() => _FileTreeState();
 }
@@ -69,6 +75,16 @@ class _FileTreeState extends State<FileTree> {
 
   /// The row currently showing the inline rename field.
   String? _renaming;
+
+  /// Where a new file or folder is being named, if anywhere.
+  ({String dir, bool isDir})? _creating;
+
+  /// The folder a dragged item would be dropped into, for highlighting.
+  String? _dropDir;
+
+  /// Expands a collapsed folder when a drag hovers over it for a moment.
+  Timer? _dragExpandTimer;
+  String? _dragExpandPath;
 
   /// Guards against starting another operation while one is running.
   bool _busy = false;
@@ -88,6 +104,7 @@ class _FileTreeState extends State<FileTree> {
   @override
   void dispose() {
     _statusTimer?.cancel();
+    _dragExpandTimer?.cancel();
     fileTreeRefreshSignal.removeListener(_loadStatus);
     fileClipboard.removeListener(_onClipboardChanged);
     _focusNode.dispose();
@@ -108,6 +125,7 @@ class _FileTreeState extends State<FileTree> {
       _status = const {};
       _selected = null;
       _renaming = null;
+      _creating = null;
       _loadStatus();
     }
     if (oldWidget.selectedPath != widget.selectedPath &&
@@ -218,10 +236,15 @@ class _FileTreeState extends State<FileTree> {
     return FileSystemEntity.isDirectorySync(path) ? path : p.dirname(path);
   }
 
-  Future<void> _paste(String? at) => _run(() async {
-        final entry = fileClipboard.value;
-        if (entry == null) return;
-        final targetDir = _pasteTargetFor(at);
+  Future<void> _paste(String? at) async {
+    final entry = fileClipboard.value;
+    if (entry == null) return;
+    await _pasteEntry(entry, _pasteTargetFor(at));
+  }
+
+  /// Copies or moves [entry] into [targetDir]; drag and drop moves too.
+  Future<void> _pasteEntry(FileClipboardEntry entry, String targetDir) =>
+      _run(() async {
         if (entry.isCut &&
             !(await widget.onBeforeChange?.call(entry.path) ?? true)) {
           return;
@@ -229,7 +252,10 @@ class _FileTreeState extends State<FileTree> {
         final dest = await FileOps.paste(entry, targetDir);
         if (entry.isCut) {
           // A cut can be pasted only once.
-          fileClipboard.value = null;
+          final clip = fileClipboard.value;
+          if (clip != null && FileOps.isSameOrWithin(entry.path, clip.path)) {
+            fileClipboard.value = null;
+          }
           if (dest != entry.path) widget.onPathMoved?.call(entry.path, dest);
           _moveExpanded(entry.path, dest);
         }
@@ -252,9 +278,118 @@ class _FileTreeState extends State<FileTree> {
     }
   }
 
+  void _startCreate(String? at, {required bool isDir}) {
+    final dir = _pasteTargetFor(at);
+    setState(() {
+      _renaming = null;
+      _expanded.add(dir);
+      _revealPath(p.join(dir, 'x'));
+      _creating = (dir: dir, isDir: isDir);
+    });
+  }
+
+  Future<void> _commitCreate(String name) async {
+    final creating = _creating;
+    if (creating == null) return;
+    setState(() => _creating = null);
+    if (name.trim().isEmpty) {
+      _focusNode.requestFocus();
+      return;
+    }
+    await _run(() async {
+      final path = await FileOps.create(
+        creating.dir,
+        name,
+        isDir: creating.isDir,
+      );
+      _revealPath(path);
+      _selected = path;
+      if (creating.isDir) {
+        _expanded.add(path);
+      } else {
+        widget.onOpenFile(path);
+      }
+    });
+    if (creating.isDir) _focusNode.requestFocus();
+  }
+
+  void _cancelCreate() {
+    setState(() => _creating = null);
+    _focusNode.requestFocus();
+  }
+
+  Future<void> _copyPath(String path, {required bool relative}) async {
+    final text = relative
+        ? p.split(p.relative(path, from: widget.rootPath)).join('/')
+        : path;
+    await Clipboard.setData(ClipboardData(text: text));
+  }
+
+  Future<void> _reveal(String path) async {
+    final error = await revealInFileExplorer(path);
+    if (error != null) _showError(error);
+  }
+
+  // ---- Drag and drop ------------------------------------------------------
+
+  /// The folder a drop on [path] lands in: the folder itself, or a file's
+  /// parent; the root for null.
+  String _dropDirFor(String? path) => _pasteTargetFor(path);
+
+  bool _canDrop(String src, String targetDir) {
+    if (FileOps.isSameOrWithin(src, targetDir)) return false;
+    return !p.equals(p.dirname(src), targetDir);
+  }
+
+  void _onDragHover(String? rowPath, String src) {
+    final dir = _dropDirFor(rowPath);
+    final accept = _canDrop(src, dir);
+    if (_dropDir != (accept ? dir : null)) {
+      setState(() => _dropDir = accept ? dir : null);
+    }
+    // Hovering a collapsed folder opens it after a moment.
+    if (rowPath != null &&
+        rowPath == dir &&
+        !_expanded.contains(dir) &&
+        _dragExpandPath != dir) {
+      _dragExpandTimer?.cancel();
+      _dragExpandPath = dir;
+      _dragExpandTimer = Timer(const Duration(milliseconds: 700), () {
+        if (mounted && _dragExpandPath == dir) {
+          setState(() => _expanded.add(dir));
+        }
+      });
+    }
+  }
+
+  void _onDragLeave() {
+    _dragExpandTimer?.cancel();
+    _dragExpandPath = null;
+    if (_dropDir != null) setState(() => _dropDir = null);
+  }
+
+  Future<void> _onDrop(String? rowPath, String src) async {
+    final dir = _dropDirFor(rowPath);
+    _onDragLeave();
+    if (!_canDrop(src, dir)) return;
+    await _pasteEntry(FileClipboardEntry(src, isCut: true), dir);
+  }
+
+  Widget _dropTarget({required String? rowPath, required Widget child}) {
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (details) =>
+          _canDrop(details.data, _dropDirFor(rowPath)),
+      onMove: (details) => _onDragHover(rowPath, details.data),
+      onLeave: (_) => _onDragLeave(),
+      onAcceptWithDetails: (details) => _onDrop(rowPath, details.data),
+      builder: (context, _, _) => child,
+    );
+  }
+
   void _startRename(String path) {
     if (p.equals(path, widget.rootPath)) return;
     setState(() {
+      _creating = null;
       _selected = path;
       _renaming = path;
     });
@@ -334,6 +469,13 @@ class _FileTreeState extends State<FileTree> {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final isRoot = path == null || p.equals(path, widget.rootPath);
     final mod = Platform.isMacOS ? '⌘' : 'Ctrl+';
+    final revealLabel = translate(
+      Platform.isWindows
+          ? 'file_reveal_explorer'
+          : Platform.isMacOS
+              ? 'file_reveal_finder'
+              : 'file_reveal_files',
+    );
 
     PopupMenuItem<String> item(
       String value,
@@ -363,6 +505,9 @@ class _FileTreeState extends State<FileTree> {
         Offset.zero & overlay.size,
       ),
       items: [
+        item('new_file', translate('file_new_file')),
+        item('new_folder', translate('file_new_folder')),
+        const PopupMenuDivider(),
         if (!isRoot) ...[
           item('cut', translate('file_cut'), shortcut: '${mod}X'),
           item('copy', translate('copy'), shortcut: '${mod}C'),
@@ -373,6 +518,11 @@ class _FileTreeState extends State<FileTree> {
           shortcut: '${mod}V',
           enabled: fileClipboard.value != null,
         ),
+        const PopupMenuDivider(),
+        item('copy_path', translate('file_copy_path')),
+        if (!isRoot)
+          item('copy_relative_path', translate('file_copy_relative_path')),
+        item('reveal', revealLabel),
         if (!isRoot) ...[
           const PopupMenuDivider(),
           item('rename', translate('file_rename'), shortcut: 'F2'),
@@ -385,7 +535,18 @@ class _FileTreeState extends State<FileTree> {
       ],
     );
     if (!mounted) return;
+    final target = path ?? widget.rootPath;
     switch (action) {
+      case 'new_file':
+        _startCreate(path, isDir: false);
+      case 'new_folder':
+        _startCreate(path, isDir: true);
+      case 'copy_path':
+        await _copyPath(target, relative: false);
+      case 'copy_relative_path':
+        await _copyPath(target, relative: true);
+      case 'reveal':
+        await _reveal(target);
       case 'cut':
         _cut(path!);
       case 'copy':
@@ -402,7 +563,7 @@ class _FileTreeState extends State<FileTree> {
   Map<ShortcutActivator, VoidCallback> get _shortcuts {
     void withSelected(void Function(String path) action) {
       final path = _selected;
-      if (path == null || _renaming != null) return;
+      if (path == null || _renaming != null || _creating != null) return;
       if (FileSystemEntity.typeSync(path) == FileSystemEntityType.notFound) {
         return;
       }
@@ -423,7 +584,9 @@ class _FileTreeState extends State<FileTree> {
             () => withSelected(_copy),
         SingleActivator(LogicalKeyboardKey.keyV, control: !meta, meta: meta):
             () {
-          if (_renaming == null) unawaited(_paste(_selected));
+          if (_renaming == null && _creating == null) {
+            unawaited(_paste(_selected));
+          }
         },
       });
     }
@@ -457,7 +620,13 @@ class _FileTreeState extends State<FileTree> {
               onSecondaryTapUp: (details) =>
                   _showContextMenu(details.globalPosition, null),
               onTap: () => _focusNode.requestFocus(),
-              child: ListView(
+              child: _dropTarget(
+                rowPath: null,
+                child: Container(
+                color: _dropDir != null && p.equals(_dropDir!, widget.rootPath)
+                    ? c.accent.withValues(alpha: 0.06)
+                    : null,
+                child: ListView(
                 padding: const EdgeInsets.fromLTRB(8, 16, 8, 16),
                 children: [
                   Padding(
@@ -475,6 +644,15 @@ class _FileTreeState extends State<FileTree> {
                             ),
                           ),
                         ),
+                        if (widget.onSearchContent != null)
+                          IconButton(
+                            icon: const Icon(Icons.manage_search, size: 17),
+                            color: c.muted,
+                            visualDensity: VisualDensity.compact,
+                            tooltip:
+                                '${translate('content_search')} (${mod}Shift+F)',
+                            onPressed: widget.onSearchContent,
+                          ),
                         if (widget.onSearch != null)
                           IconButton(
                             icon: const Icon(Icons.search, size: 16),
@@ -490,6 +668,8 @@ class _FileTreeState extends State<FileTree> {
                   ..._buildEntries(widget.rootPath, 0),
                 ],
               ),
+              ),
+              ),
             ),
           ),
         ),
@@ -500,11 +680,30 @@ class _FileTreeState extends State<FileTree> {
   List<Widget> _buildEntries(String dir, int depth) {
     final widgets = <Widget>[];
     final clip = fileClipboard.value;
+    final creating = _creating;
+    if (creating != null && p.equals(creating.dir, dir)) {
+      widgets.add(_FileTreeRow(
+        key: const ValueKey('__new_entry__'),
+        name: '',
+        depth: depth,
+        isDirectory: creating.isDir,
+        isExpanded: false,
+        isSelected: true,
+        isCut: false,
+        isRenaming: true,
+        isDropTarget: false,
+        statusLetter: null,
+        onTap: () {},
+        onSecondaryTap: (_) {},
+        onRenameSubmit: _commitCreate,
+        onRenameCancel: _cancelCreate,
+      ));
+    }
     for (final entity in _listDir(dir)) {
       final path = entity.path;
       final isDir = entity is Directory;
       final isExpanded = _expanded.contains(path);
-      widgets.add(_FileTreeRow(
+      final row = _FileTreeRow(
         key: ValueKey(path),
         name: p.basename(path),
         depth: depth,
@@ -513,6 +712,7 @@ class _FileTreeState extends State<FileTree> {
         isSelected: path == _selected,
         isCut: clip != null && clip.isCut && clip.path == path,
         isRenaming: path == _renaming,
+        isDropTarget: isDir && _dropDir != null && p.equals(_dropDir!, path),
         statusLetter: isDir ? null : _status[p.normalize(path)],
         onTap: () {
           _focusNode.requestFocus();
@@ -531,6 +731,23 @@ class _FileTreeState extends State<FileTree> {
         onSecondaryTap: (position) => _showContextMenu(position, path),
         onRenameSubmit: (name) => _commitRename(path, name),
         onRenameCancel: _cancelRename,
+      );
+      // Keyed on the outermost widget so a drag in progress stays with its
+      // row when folders above it expand or collapse.
+      widgets.add(KeyedSubtree(
+        key: ValueKey('entry:$path'),
+        child: path == _renaming
+            ? row
+            : _dropTarget(
+                rowPath: path,
+                child: Draggable<String>(
+                  data: path,
+                  dragAnchorStrategy: pointerDragAnchorStrategy,
+                  feedback: _DragFeedback(name: p.basename(path), isDir: isDir),
+                  childWhenDragging: Opacity(opacity: 0.5, child: row),
+                  child: row,
+                ),
+              ),
       ));
       if (isDir && isExpanded) {
         widgets.addAll(_buildEntries(path, depth + 1));
@@ -550,6 +767,7 @@ class _FileTreeRow extends StatefulWidget {
     required this.isSelected,
     required this.isCut,
     required this.isRenaming,
+    required this.isDropTarget,
     required this.statusLetter,
     required this.onTap,
     required this.onSecondaryTap,
@@ -564,6 +782,7 @@ class _FileTreeRow extends StatefulWidget {
   final bool isSelected;
   final bool isCut;
   final bool isRenaming;
+  final bool isDropTarget;
   final String? statusLetter;
   final VoidCallback onTap;
   final ValueChanged<Offset> onSecondaryTap;
@@ -703,8 +922,15 @@ class _FileTreeRowState extends State<_FileTreeRow> {
             opacity: widget.isCut ? 0.5 : 1,
             child: Container(
               decoration: BoxDecoration(
-                color: highlighted ? c.hover : null,
+                color: widget.isDropTarget
+                    ? c.accent.withValues(alpha: 0.15)
+                    : highlighted
+                        ? c.hover
+                        : null,
                 borderRadius: BorderRadius.circular(6),
+                border: widget.isDropTarget
+                    ? Border.all(color: c.accent.withValues(alpha: 0.6))
+                    : null,
               ),
               padding: EdgeInsetsDirectional.only(
                 start: 12.0 + widget.depth * 14,
@@ -732,6 +958,42 @@ class _FileTreeRowState extends State<_FileTreeRow> {
                 ],
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What follows the pointer while dragging a tree item.
+class _DragFeedback extends StatelessWidget {
+  const _DragFeedback({required this.name, required this.isDir});
+
+  final String name;
+  final bool isDir;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.branchi;
+    return Transform.translate(
+      offset: const Offset(12, 8),
+      child: Material(
+        elevation: 4,
+        borderRadius: BorderRadius.circular(6),
+        color: c.bg,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isDir ? Icons.folder_outlined : Icons.insert_drive_file_outlined,
+                size: 14,
+                color: c.muted,
+              ),
+              const SizedBox(width: 6),
+              Text(name, style: TextStyle(fontSize: 13, color: c.fg)),
+            ],
           ),
         ),
       ),

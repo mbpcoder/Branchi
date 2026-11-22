@@ -196,6 +196,56 @@ class FileOps {
     }
   }
 
+  /// Checks [name] for a new file or folder in [dir]. Slashes create
+  /// nested folders ("src/util.dart"). Returns an error message, or null.
+  static String? validateNewEntry(String dir, String name) {
+    final segments = _segments(name);
+    if (segments.isEmpty) return 'A name is required.';
+    for (final segment in segments) {
+      if (segment == '.' || segment == '..') return 'That name is not allowed.';
+      if (Platform.isWindows && RegExp(r'[<>:"|?*]').hasMatch(segment)) {
+        return r'A name cannot contain < > : " | ? *';
+      }
+    }
+    final dest = p.joinAll([dir, ...segments]);
+    if (_exists(dest)) return '${segments.join('/')} already exists here.';
+    return null;
+  }
+
+  static List<String> _segments(String name) => name
+      .trim()
+      .split(RegExp(r'[/\\]'))
+      .map((s) => s.trim())
+      .where((s) => s.isNotEmpty)
+      .toList();
+
+  /// Creates an empty file, or a folder when [isDir], named [name] inside
+  /// [dir], creating any intermediate folders. Returns the new path.
+  static Future<String> create(String dir, String name, {required bool isDir}) async {
+    final error = validateNewEntry(dir, name);
+    if (error != null) throw FileOpException(error);
+    final dest = p.joinAll([dir, ..._segments(name)]);
+    try {
+      if (isDir) {
+        await Directory(dest).create(recursive: true);
+      } else {
+        await File(dest).create(recursive: true, exclusive: true);
+      }
+      ActionLog.instance.record('create $dest', success: true);
+      return dest;
+    } on FileSystemException catch (error) {
+      ActionLog.instance.record(
+        'create $dest',
+        success: false,
+        detail: error.toString(),
+      );
+      throw FileOpException(
+        'Failed to create ${p.basename(dest)}: '
+        '${error.osError?.message ?? error.message}',
+      );
+    }
+  }
+
   /// Moves [path] to the OS trash / Recycle Bin.
   static Future<void> moveToTrash(String path) async {
     final ffi = GitFfi.instanceOrNull;

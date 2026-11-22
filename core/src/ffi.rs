@@ -542,6 +542,36 @@ pub unsafe extern "C" fn branchi_find_files(
     ))
 }
 
+/// Searches the contents of every non-ignored text file under `root` for
+/// `query` (literal text unless `regex`). Returns
+/// `{"ok": {"matches": [ContentMatch, ...], "truncated": bool}}` or
+/// `{"error": "..."}` (e.g. for an invalid regex).
+///
+/// # Safety
+/// `root` and `query` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_search_content(
+    root: *const c_char,
+    query: *const c_char,
+    regex: bool,
+    case_sensitive: bool,
+    whole_word: bool,
+    max_matches: usize,
+) -> *mut c_char {
+    let root = c_str_to_string(root);
+    let query = c_str_to_string(query);
+    let options = crate::content_search::ContentSearchOptions {
+        regex,
+        case_sensitive,
+        whole_word,
+        max_matches,
+    };
+    result_to_json_c_string(crate::content_search::search_content(
+        &root, &query, &options,
+    ))
+}
+
 /// Releases a string previously returned by one of this module's
 /// functions. Safe to call with a null pointer (no-op).
 ///

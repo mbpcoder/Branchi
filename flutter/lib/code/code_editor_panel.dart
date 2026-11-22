@@ -54,6 +54,46 @@ class _OpenFile {
   VoidCallback? onAutoSave;
   Timer? autoSaveTimer;
   late String savedText;
+
+  /// Last known modification time of the file on disk, to notice changes
+  /// made outside the editor (a branch switch, a pull, another app).
+  DateTime? diskModified;
+
+  /// Whether the file on disk changed under unsaved edits, or was deleted.
+  /// Auto-save is paused until the user decides.
+  _DiskConflict? conflict;
+
+  /// Bumped when a preview's file changes on disk, to redraw it.
+  int previewVersion = 0;
+
+  /// Replaces the text with [text] from disk, keeping the cursor where it
+  /// was as far as the new text allows, without marking the file dirty.
+  void loadFromDisk(String text) {
+    final previous = controller.selection;
+    savedText = text;
+    controller.text = text;
+    savedText = controller.text;
+    autoSaveTimer?.cancel();
+    autoSaveTimer = null;
+    isDirty = false;
+    final lines = controller.text.split('\n');
+    final index = previous.extentIndex.clamp(0, lines.length - 1);
+    controller.selection = CodeLineSelection.collapsed(
+      index: index,
+      offset: previous.extentOffset.clamp(0, lines[index].length),
+    );
+  }
+}
+
+enum _DiskConflict { changed, deleted }
+
+Future<DateTime?> _modifiedOnDisk(String path) async {
+  try {
+    final stat = await FileStat.stat(path);
+    return stat.type == FileSystemEntityType.notFound ? null : stat.modified;
+  } catch (_) {
+    return null;
+  }
 }
 
 /// A VS Code-like tabbed text editor backed by `re_editor`, with syntax
@@ -79,9 +119,21 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
   String? _error;
   String? _lastNotifiedLanguageLabel;
 
+  /// Focus for the active text editor, so it can be refocused after e.g.
+  /// a banner button takes focus away.
+  final FocusNode _editorFocus = FocusNode(debugLabel: 'CodeEditor');
+
+  /// Checks open files for changes made outside the editor.
+  Timer? _diskTimer;
+  bool _checkingDisk = false;
+
   @override
   void initState() {
     super.initState();
+    _diskTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => unawaited(checkDisk()),
+    );
     FileLanguageOverrides.overrides.addListener(_onOverridesChanged);
     unawaited(FileLanguageOverrides.ensureLoaded());
     if (widget.initialFilePath != null) {
@@ -96,10 +148,14 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
   @override
   void dispose() {
     FileLanguageOverrides.overrides.removeListener(_onOverridesChanged);
+    _diskTimer?.cancel();
+    _editorFocus.dispose();
     for (final file in _open) {
       file.autoSaveTimer?.cancel();
       // Flush edits still waiting on the auto-save delay.
-      if (file.isDirty && file.kind == OpenFileKind.text) {
+      if (file.isDirty &&
+          file.kind == OpenFileKind.text &&
+          file.conflict == null) {
         try {
           File(file.path).writeAsStringSync(file.controller.text);
         } catch (_) {
@@ -112,10 +168,18 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
     super.dispose();
   }
 
-  Future<void> openFile(String path) async {
+  /// Opens [path] in a tab (or switches to it). With [line] (1-based),
+  /// moves the cursor there and selects [length] characters from [column].
+  Future<void> openFile(
+    String path, {
+    int? line,
+    int column = 0,
+    int length = 0,
+  }) async {
     final existingIndex = _open.indexWhere((f) => f.path == path);
     if (existingIndex != -1) {
       setState(() => _activeIndex = existingIndex);
+      if (line != null) _revealPosition(_open[existingIndex], line, column, length);
       return;
     }
 
@@ -130,14 +194,17 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
         setState(() => _activeIndex = openedIndex);
         return;
       }
-      final file = _OpenFile(path, text, kind: kind);
+      final file = _OpenFile(path, text, kind: kind)
+        ..diskModified = await _modifiedOnDisk(path);
+      if (!mounted) return;
       file.onDirtyChanged = () => setState(() {});
-      file.onAutoSave = () => unawaited(_save(file));
+      file.onAutoSave = () => unawaited(_autoSave(file));
       setState(() {
         _open.add(file);
         _activeIndex = _open.length - 1;
         _error = null;
       });
+      if (line != null) _revealPosition(file, line, column, length);
     } on FileSystemException catch (error) {
       if (!mounted) return;
       // Not valid UTF-8 text: show it as a binary file instead of failing.
@@ -157,15 +224,142 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
     }
   }
 
+  /// Reloads tabs whose file changed on disk. A tab with unsaved edits
+  /// isn't reloaded; it shows a choice instead (see [_DiskConflict]).
+  Future<void> checkDisk() async {
+    if (_checkingDisk || !mounted) return;
+    _checkingDisk = true;
+    try {
+      for (final file in List.of(_open)) {
+        final path = file.path;
+        final modified = await _modifiedOnDisk(path);
+        // Skip results for a tab that closed or was renamed meanwhile.
+        if (!mounted || !_open.contains(file) || file.path != path) continue;
+        if (modified == null) {
+          if (file.conflict != _DiskConflict.deleted) {
+            file.autoSaveTimer?.cancel();
+            setState(() => file.conflict = _DiskConflict.deleted);
+          }
+          continue;
+        }
+        if (modified == file.diskModified &&
+            file.conflict != _DiskConflict.deleted) {
+          continue;
+        }
+        if (file.kind != OpenFileKind.text) {
+          setState(() {
+            file.diskModified = modified;
+            file.conflict = null;
+            file.previewVersion++;
+          });
+          continue;
+        }
+        final String text;
+        try {
+          text = await File(file.path).readAsString();
+        } catch (_) {
+          continue; // Mid-write or no longer text; try again next time.
+        }
+        if (!mounted || !_open.contains(file) || file.path != path) continue;
+        file.diskModified = modified;
+        if (text == file.savedText ||
+            (file.isDirty && text == file.controller.text)) {
+          // Only the timestamp changed, or disk already matches the edits.
+          if (file.conflict != null) setState(() => file.conflict = null);
+          continue;
+        }
+        if (file.isDirty) {
+          file.autoSaveTimer?.cancel();
+          setState(() => file.conflict = _DiskConflict.changed);
+        } else {
+          setState(() {
+            file.loadFromDisk(text);
+            file.conflict = null;
+          });
+        }
+      }
+    } finally {
+      _checkingDisk = false;
+    }
+  }
+
+  /// Saves [file] after a typing pause, unless the file changed on disk
+  /// since it was loaded: then it asks instead of overwriting.
+  Future<void> _autoSave(_OpenFile file) async {
+    if (file.conflict != null) return;
+    final modified = await _modifiedOnDisk(file.path);
+    if (!mounted || !_open.contains(file) || file.conflict != null) return;
+    if (modified == null) {
+      setState(() => file.conflict = _DiskConflict.deleted);
+      return;
+    }
+    if (file.diskModified != null && modified != file.diskModified) {
+      // Let the disk check decide: reload silently if it only touched the
+      // timestamp, otherwise show the conflict.
+      await checkDisk();
+      if (!mounted || !_open.contains(file) || file.conflict != null) return;
+      if (file.diskModified != modified) {
+        // A check already in flight skipped this file; try again shortly.
+        file.autoSaveTimer?.cancel();
+        file.autoSaveTimer =
+            Timer(_OpenFile.autoSaveDelay, () => unawaited(_autoSave(file)));
+        return;
+      }
+    }
+    await _save(file);
+  }
+
+  /// Drops the unsaved edits in [file] and loads the version on disk.
+  Future<void> _reloadFromDisk(_OpenFile file) async {
+    try {
+      final text = await File(file.path).readAsString();
+      final modified = await _modifiedOnDisk(file.path);
+      if (!mounted || !_open.contains(file)) return;
+      setState(() {
+        file.loadFromDisk(text);
+        file.diskModified = modified;
+        file.conflict = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = 'Failed to reload ${p.basename(file.path)}: $error');
+    }
+  }
+
+  /// Keeps the edits in [file] and writes them over the version on disk
+  /// (or recreates a deleted file).
+  Future<void> _keepMine(_OpenFile file) async {
+    file.conflict = null;
+    await _save(file);
+  }
+
+  /// Selects [length] characters at [line] (1-based) / [column] in [file]
+  /// and scrolls them into view, once the editor for it is laid out.
+  void _revealPosition(_OpenFile file, int line, int column, int length) {
+    if (file.kind != OpenFileKind.text) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_open.contains(file)) return;
+      final lines = file.controller.text.split('\n');
+      final index = (line - 1).clamp(0, lines.length - 1);
+      final start = column.clamp(0, lines[index].length);
+      final end = (column + length).clamp(start, lines[index].length);
+      file.controller.selection = CodeLineSelection(
+        baseIndex: index,
+        baseOffset: start,
+        extentIndex: index,
+        extentOffset: end,
+      );
+      file.controller.makeCursorCenterIfInvisible();
+    });
+  }
+
   /// Switches an SVG preview tab to its source text.
   Future<void> _showSource(_OpenFile file) async {
     try {
       final text = await File(file.path).readAsString();
       if (!mounted || !_open.contains(file)) return;
       setState(() {
-        file.controller.text = text;
-        file.savedText = file.controller.text;
-        file.isDirty = false;
+        file.loadFromDisk(text);
         file.kind = OpenFileKind.text;
       });
     } catch (error) {
@@ -195,6 +389,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
       file.path = p.equals(from, file.path)
           ? to
           : p.join(to, p.relative(file.path, from: from));
+      if (file.conflict == _DiskConflict.deleted) file.conflict = null;
       changed = true;
     }
     if (changed && mounted) setState(() {});
@@ -247,10 +442,13 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
     final text = file.controller.text;
     try {
       await File(file.path).writeAsString(text);
+      final modified = await _modifiedOnDisk(file.path);
       if (!mounted || !_open.contains(file)) return true;
       setState(() {
         file.savedText = text;
         file.isDirty = file.controller.text != text;
+        file.diskModified = modified;
+        file.conflict = null;
       });
       fileTreeRefreshSignal.value++;
       return true;
@@ -371,7 +569,10 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
                   child: _TabStrip(
                     files: _open,
                     activeIndex: _activeIndex,
-                    onSelect: (i) => setState(() => _activeIndex = i),
+                    onSelect: (i) {
+                      setState(() => _activeIndex = i);
+                      unawaited(checkDisk());
+                    },
                     onClose: _closeTab,
                   ),
                 ),
@@ -424,10 +625,24 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
                 ],
               ),
             ),
+          if (active.conflict != null)
+            _DiskConflictBanner(
+              conflict: active.conflict!,
+              isDirty: active.isDirty,
+              onReload: () {
+                unawaited(_reloadFromDisk(active));
+                _editorFocus.requestFocus();
+              },
+              onKeepMine: () {
+                unawaited(_keepMine(active));
+                _editorFocus.requestFocus();
+              },
+              onClose: () => handlePathDeleted(active.path),
+            ),
           if (active.kind != OpenFileKind.text)
             Expanded(
               child: FilePreview(
-                key: ValueKey(active.path),
+                key: ValueKey('${active.path}#${active.previewVersion}'),
                 path: active.path,
                 kind: active.kind,
                 onShowSource: active.kind == OpenFileKind.svg
@@ -448,6 +663,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
                 autofocus: true,
                 child: CodeEditor(
                   key: ValueKey(active.path),
+                  focusNode: _editorFocus,
                   controller: active.controller,
                   // re_editor binds Ctrl/Cmd+S to its own (no-op) save intent
                   // and swallows the key, so the CallbackShortcuts above
@@ -583,6 +799,70 @@ class _EditorFooter extends StatelessWidget {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// Shown above a tab whose file changed or vanished on disk.
+class _DiskConflictBanner extends StatelessWidget {
+  const _DiskConflictBanner({
+    required this.conflict,
+    required this.isDirty,
+    required this.onReload,
+    required this.onKeepMine,
+    required this.onClose,
+  });
+
+  final _DiskConflict conflict;
+  final bool isDirty;
+  final VoidCallback onReload;
+  final VoidCallback onKeepMine;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.branchi;
+    final deleted = conflict == _DiskConflict.deleted;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+      decoration: BoxDecoration(
+        color: c.mod.withValues(alpha: 0.12),
+        border: Border(bottom: c.hairline),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.warning_amber_rounded, size: 16, color: c.mod),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              translate(
+                deleted ? 'editor_deleted_on_disk' : 'editor_changed_on_disk',
+              ),
+              style: TextStyle(fontSize: 12, color: c.fg),
+            ),
+          ),
+          if (deleted) ...[
+            if (isDirty)
+              TextButton(
+                onPressed: onKeepMine,
+                child: Text(translate('editor_save_again')),
+              ),
+            TextButton(
+              onPressed: onClose,
+              child: Text(translate('editor_close_tab')),
+            ),
+          ] else ...[
+            TextButton(
+              onPressed: onReload,
+              child: Text(translate('editor_reload')),
+            ),
+            TextButton(
+              onPressed: onKeepMine,
+              child: Text(translate('editor_keep_mine')),
+            ),
+          ],
+        ],
       ),
     );
   }

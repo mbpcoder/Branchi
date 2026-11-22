@@ -47,6 +47,23 @@ typedef _FindFilesDart = Pointer<Utf8> Function(
   bool refresh,
 );
 
+typedef _SearchContentNative = Pointer<Utf8> Function(
+  Pointer<Utf8> root,
+  Pointer<Utf8> query,
+  Bool regex,
+  Bool caseSensitive,
+  Bool wholeWord,
+  IntPtr maxMatches,
+);
+typedef _SearchContentDart = Pointer<Utf8> Function(
+  Pointer<Utf8> root,
+  Pointer<Utf8> query,
+  bool regex,
+  bool caseSensitive,
+  bool wholeWord,
+  int maxMatches,
+);
+
 typedef _IsRepositoryNative = Bool Function(Pointer<Utf8> path);
 typedef _IsRepositoryDart = bool Function(Pointer<Utf8> path);
 
@@ -342,6 +359,10 @@ class GitFfi {
             _GlobalConfigGetDart>('branchi_global_config_get'),
         _globalConfigSet = lib.lookupFunction<_GlobalConfigSetNative,
             _GlobalConfigSetDart>('branchi_global_config_set'),
+        _searchContent =
+            lib.lookupFunction<_SearchContentNative, _SearchContentDart>(
+          'branchi_search_content',
+        ),
         _findFiles = lib.lookupFunction<_FindFilesNative, _FindFilesDart>(
           'branchi_find_files',
         ),
@@ -401,6 +422,7 @@ class GitFfi {
   final _GlobalConfigSetDart _globalConfigSet;
   final _MoveToTrashDart _moveToTrash;
   final _FindFilesDart _findFiles;
+  final _SearchContentDart _searchContent;
   final _FreeStringDart _freeString;
 
   /// Runs `git init` at [path] via the Rust core. Returns null on success,
@@ -463,6 +485,42 @@ class GitFfi {
     final queryPtr = query.toNativeUtf8();
     try {
       return _consumeJsonList(_findFiles(rootPtr, queryPtr, limit, refresh));
+    } finally {
+      malloc.free(rootPtr);
+      malloc.free(queryPtr);
+    }
+  }
+
+  /// Searches file contents under [root] for [query]. Returns
+  /// `{"matches": [...], "truncated": bool}`; each match is
+  /// `{"path", "line", "column", "text", "ranges"}`. Throws
+  /// [GitFfiException] on failure, e.g. for an invalid regex.
+  Map<String, dynamic> searchContent(
+    String root,
+    String query, {
+    bool regex = false,
+    bool caseSensitive = false,
+    bool wholeWord = false,
+    int maxMatches = 2000,
+  }) {
+    final rootPtr = root.toNativeUtf8();
+    final queryPtr = query.toNativeUtf8();
+    try {
+      final resultPtr = _searchContent(
+        rootPtr,
+        queryPtr,
+        regex,
+        caseSensitive,
+        wholeWord,
+        maxMatches,
+      );
+      final text = resultPtr.toDartString();
+      _freeString(resultPtr);
+      final decoded = jsonDecode(text) as Map<String, dynamic>;
+      if (decoded.containsKey('error')) {
+        throw GitFfiException(decoded['error'] as String);
+      }
+      return decoded['ok'] as Map<String, dynamic>;
     } finally {
       malloc.free(rootPtr);
       malloc.free(queryPtr);
