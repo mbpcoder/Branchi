@@ -46,6 +46,10 @@ pub struct BranchInfo {
     pub name: String,
     pub is_head: bool,
     pub is_remote: bool,
+    /// The default branch this branch is already fully merged into (e.g.
+    /// `origin/main`), or `None` when it isn't merged or is the default
+    /// branch itself. See [`GitRepo::default_branch`].
+    pub merged_into: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -406,13 +410,29 @@ impl GitRepo {
             .collect())
     }
 
-    /// Local and remote-tracking branches.
+    /// Local and remote-tracking branches, each marked with whether it is
+    /// already merged into the default branch.
     pub fn branches(&self) -> Result<Vec<BranchInfo>> {
         let head_name = self
             .repo
             .head()
             .ok()
             .and_then(|h| h.shorthand().map(str::to_string));
+
+        let base = self.default_branch();
+        let base_tip = base.as_ref().map(|(_, tip)| *tip);
+        // The default branch's name on the other side (local `main` for
+        // `origin/main`, and the reverse) is the same line of work, so it
+        // isn't marked as merged either.
+        let base_names: Vec<String> = match &base {
+            Some((name, _)) => match name.split_once('/') {
+                Some((_, short)) if self.is_remote_branch(name) => {
+                    vec![name.clone(), short.to_string()]
+                }
+                _ => vec![name.clone()],
+            },
+            None => Vec::new(),
+        };
 
         let mut result = Vec::new();
         for entry in self.repo.branches(None)? {
@@ -424,14 +444,61 @@ impl GitRepo {
             let is_remote = branch_type == git2::BranchType::Remote;
             let is_head = !is_remote && head_name.as_deref() == Some(name.as_str());
 
+            let is_base =
+                base_names.iter().any(|b| b == &name) || (is_remote && name.ends_with("/HEAD"));
+            let merged_into = match (base_tip, branch.get().target()) {
+                (Some(base_tip), Some(tip)) if !is_base && self.is_merged(tip, base_tip) => {
+                    base.as_ref().map(|(name, _)| name.clone())
+                }
+                _ => None,
+            };
+
             result.push(BranchInfo {
                 name,
                 is_head,
                 is_remote,
+                merged_into,
             });
         }
 
         Ok(result)
+    }
+
+    /// The branch other branches are checked against for "already merged":
+    /// the remote's default branch (`origin/HEAD`, e.g. `origin/main`), else
+    /// local `main`, else local `master`. Returns its name and tip commit.
+    pub fn default_branch(&self) -> Option<(String, git2::Oid)> {
+        let remote_default = self
+            .repo
+            .find_reference("refs/remotes/origin/HEAD")
+            .ok()
+            .and_then(|r| r.symbolic_target().map(str::to_string))
+            .and_then(|target| {
+                let name = target.strip_prefix("refs/remotes/")?.to_string();
+                let tip = self.repo.refname_to_id(&target).ok()?;
+                Some((name, tip))
+            });
+        remote_default.or_else(|| {
+            ["main", "master"].into_iter().find_map(|name| {
+                let branch = self.repo.find_branch(name, git2::BranchType::Local).ok()?;
+                Some((name.to_string(), branch.get().target()?))
+            })
+        })
+    }
+
+    fn is_remote_branch(&self, name: &str) -> bool {
+        self.repo
+            .find_branch(name, git2::BranchType::Remote)
+            .is_ok()
+    }
+
+    /// Whether every commit of `tip` is already in `base_tip`.
+    fn is_merged(&self, tip: git2::Oid, base_tip: git2::Oid) -> bool {
+        tip == base_tip
+            || self
+                .repo
+                .graph_descendant_of(base_tip, tip)
+                .unwrap_or(false)
     }
 
     /// Stage a file (equivalent to `git add <path>`).
@@ -1538,6 +1605,83 @@ mod tests {
         assert!(merged.merged);
         let base_stat = report.branches.iter().find(|b| b.name == base).unwrap();
         assert!(!base_stat.merged);
+    }
+
+    #[test]
+    fn branches_marks_merged_into_local_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        repo.commit("init", "Ann", "ann@example.com").unwrap();
+        let base = repo.repo.head().unwrap().shorthand().unwrap().to_string();
+        assert!(base == "main" || base == "master");
+
+        repo.create_branch("done", None).unwrap();
+        repo.create_branch("feature", None).unwrap();
+        repo.checkout_branch("feature").unwrap();
+        write_file(dir.path(), "b.txt", "b");
+        repo.stage("b.txt").unwrap();
+        repo.commit("feature work", "Bob", "bob@example.com")
+            .unwrap();
+
+        let branches = repo.branches().unwrap();
+        let merged_into = |name: &str| {
+            branches
+                .iter()
+                .find(|b| b.name == name)
+                .unwrap()
+                .merged_into
+                .clone()
+        };
+        assert_eq!(merged_into("done"), Some(base.clone()));
+        assert_eq!(merged_into("feature"), None);
+        assert_eq!(merged_into(&base), None);
+    }
+
+    #[test]
+    fn branches_prefers_remote_default_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        repo.commit("init", "Ann", "ann@example.com").unwrap();
+        let base = repo.repo.head().unwrap().shorthand().unwrap().to_string();
+
+        // A branch with work that only the remote's default branch has
+        // merged (local `main`/`master` is behind).
+        repo.create_branch("shipped", None).unwrap();
+        repo.checkout_branch("shipped").unwrap();
+        write_file(dir.path(), "b.txt", "b");
+        repo.stage("b.txt").unwrap();
+        repo.commit("shipped work", "Bob", "bob@example.com")
+            .unwrap();
+        let shipped_tip = repo.repo.head().unwrap().target().unwrap();
+        repo.repo
+            .reference("refs/remotes/origin/develop", shipped_tip, true, "test")
+            .unwrap();
+        repo.repo
+            .reference_symbolic(
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/develop",
+                true,
+                "test",
+            )
+            .unwrap();
+        repo.checkout_branch(&base).unwrap();
+
+        let branches = repo.branches().unwrap();
+        let find = |name: &str| branches.iter().find(|b| b.name == name).unwrap();
+        assert_eq!(
+            find("shipped").merged_into.as_deref(),
+            Some("origin/develop")
+        );
+        assert_eq!(find(&base).merged_into.as_deref(), Some("origin/develop"));
+        assert_eq!(find("origin/develop").merged_into, None);
+        assert!(branches
+            .iter()
+            .filter(|b| b.name.ends_with("/HEAD"))
+            .all(|b| b.merged_into.is_none()));
     }
 
     #[test]

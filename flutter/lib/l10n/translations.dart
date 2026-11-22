@@ -37,6 +37,9 @@ const Map<String, Map<String, String>> translations = {
     'switch_to_light_mode': 'Switch to light mode',
     'language': 'Language',
     'close': 'Close',
+    'branch_merged_title': 'Already merged',
+    'branch_merged_info':
+        '"{branch}" is already merged into "{base}": all of its commits are in it. It is shown in a different color so you can spot branches that are safe to delete.',
     'terminal': 'Terminal',
     'logs': 'Logs',
     'no_logged_actions': 'No git actions have run yet.',
@@ -335,6 +338,9 @@ const Map<String, Map<String, String>> translations = {
     'switch_to_light_mode': 'التبديل إلى الوضع الفاتح',
     'language': 'اللغة',
     'close': 'إغلاق',
+    'branch_merged_title': 'مدمج مسبقًا',
+    'branch_merged_info':
+        'الفرع "{branch}" مدمج مسبقًا في "{base}": كل إيداعاته موجودة فيه. يظهر بلون مختلف لتتعرف على الفروع التي يمكن حذفها بأمان.',
     'terminal': 'الطرفية',
     'logs': 'السجلات',
     'no_logged_actions': 'لم يتم تنفيذ أي إجراءات git بعد.',
@@ -632,6 +638,9 @@ const Map<String, Map<String, String>> translations = {
     'switch_to_light_mode': 'تغییر به حالت روشن',
     'language': 'زبان',
     'close': 'بستن',
+    'branch_merged_title': 'قبلاً ادغام شده',
+    'branch_merged_info':
+        'شاخهٔ «{branch}» قبلاً در «{base}» ادغام شده است: همهٔ کامیت‌هایش در آن هست. با رنگ متفاوت نشان داده می‌شود تا شاخه‌هایی را که می‌توان با خیال راحت حذف کرد پیدا کنید.',
     'terminal': 'ترمینال',
     'logs': 'گزارش‌ها',
     'no_logged_actions': 'هنوز هیچ عملیات gitای اجرا نشده است.',

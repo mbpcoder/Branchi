@@ -61,6 +61,7 @@ class BranchEntry {
     required this.name,
     required this.isHead,
     required this.isRemote,
+    this.mergedInto,
   });
 
   factory BranchEntry.fromJson(Map<String, dynamic> json) {
@@ -68,12 +69,19 @@ class BranchEntry {
       name: json['name'] as String,
       isHead: json['is_head'] as bool,
       isRemote: json['is_remote'] as bool,
+      mergedInto: json['merged_into'] as String?,
     );
   }
 
   final String name;
   final bool isHead;
   final bool isRemote;
+
+  /// The default branch (e.g. `origin/main`) this branch is already fully
+  /// merged into, or null when it isn't merged.
+  final String? mergedInto;
+
+  bool get isMerged => mergedInto != null;
 }
 
 /// A single configured remote, as returned by `branchi_remotes`.

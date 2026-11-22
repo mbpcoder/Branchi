@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_locale.dart';
 import '../theme/app_theme.dart';
 import 'file_explorer.dart';
 import 'git_actions.dart';
@@ -722,12 +723,18 @@ class _BranchTile extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 13,
-                          color: current ? b.fg : b.muted,
+                          color: branch.isMerged
+                              ? b.mod
+                              : (current ? b.fg : b.muted),
                           fontWeight:
                               current ? FontWeight.w500 : FontWeight.w400,
                         ),
                       ),
                     ),
+                    if (branch.isMerged) ...[
+                      const SizedBox(width: 6),
+                      _MergedBadge(branch: branch),
+                    ],
                     if (current) ...[
                       const SizedBox(width: 8),
                       Container(
@@ -742,6 +749,64 @@ class _BranchTile extends StatelessWidget {
                   ],
                 ),
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The "!" next to a branch already merged into the default branch. Clicking
+/// it explains why the branch is shown in a different color.
+class _MergedBadge extends StatelessWidget {
+  const _MergedBadge({required this.branch});
+
+  final BranchEntry branch;
+
+  void _explain(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(translate('branch_merged_title')),
+        content: Text(
+          translate('branch_merged_info')
+              .replaceAll('{branch}', branch.name)
+              .replaceAll('{base}', branch.mergedInto ?? ''),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(translate('close')),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    return Tooltip(
+      message: translate('branch_merged_title'),
+      child: InkWell(
+        onTap: () => _explain(context),
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 16,
+          height: 16,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: b.mod),
+          ),
+          child: Text(
+            '!',
+            style: TextStyle(
+              fontSize: 11,
+              height: 1,
+              fontWeight: FontWeight.w700,
+              color: b.mod,
             ),
           ),
         ),
