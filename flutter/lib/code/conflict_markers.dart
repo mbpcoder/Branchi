@@ -76,7 +76,12 @@ class ConflictBar extends StatelessWidget {
     required this.onMarkResolved,
     required this.onDismissResolved,
     required this.showResolved,
+    this.mineIsBottom = false,
   });
+
+  /// True during a rebase: git puts the new base on top and the user's own
+  /// commit at the bottom, so "mine" is the bottom block.
+  final bool mineIsBottom;
 
   final CodeLineEditingController controller;
 
@@ -263,14 +268,24 @@ class ConflictBar extends StatelessWidget {
       _button(
         context,
         translate('merge_use_mine'),
-        () => _apply(lines, block, ConflictChoice.mine),
-        tooltip: translate('conflict_mine_tip') + mineName,
+        () => _apply(
+          lines,
+          block,
+          mineIsBottom ? ConflictChoice.theirs : ConflictChoice.mine,
+        ),
+        tooltip: translate('conflict_mine_tip') +
+            (mineIsBottom ? theirsName : mineName),
       ),
       _button(
         context,
         translate('merge_use_theirs'),
-        () => _apply(lines, block, ConflictChoice.theirs),
-        tooltip: translate('conflict_theirs_tip') + theirsName,
+        () => _apply(
+          lines,
+          block,
+          mineIsBottom ? ConflictChoice.mine : ConflictChoice.theirs,
+        ),
+        tooltip: translate('conflict_theirs_tip') +
+            (mineIsBottom ? mineName : theirsName),
       ),
       _button(
         context,

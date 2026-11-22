@@ -43,6 +43,12 @@ pub struct MergePreview {
     pub can_fast_forward: bool,
     /// Whether there are uncommitted changes (merging is refused then).
     pub dirty: bool,
+    /// Commits on the current branch that `source` doesn't have: what a
+    /// rebase would replay.
+    pub outgoing_count: usize,
+    /// Whether some of those are already pushed (a rebase rewrites them,
+    /// so the branch then needs a force push).
+    pub rewrites_pushed: bool,
 }
 
 const PREVIEW_LIMIT: usize = 50;
@@ -69,6 +75,7 @@ pub struct MergeOutcome {
 pub enum MergeKind {
     Merge,
     Squash,
+    Rebase,
 }
 
 /// A merge that stopped on conflicts and waits to be finished or aborted.
@@ -78,6 +85,12 @@ pub struct MergeState {
     /// The commit message the merge will be finished with.
     pub message: String,
     pub conflicts: Vec<String>,
+    /// For a rebase: the branch being rebased, what it's rebased onto, and
+    /// which of its commits is being replayed (1-based) out of how many.
+    pub branch: Option<String>,
+    pub onto: Option<String>,
+    pub step: usize,
+    pub total: usize,
 }
 
 const SQUASH_MSG: &str = "SQUASH_MSG";
@@ -134,7 +147,28 @@ impl GitRepo {
             })
             .collect::<Result<Vec<_>>>()?;
 
+        let mut walk = self.repo.revwalk()?;
+        walk.push(head.id())?;
+        walk.hide(annotated.id())?;
+        let outgoing: Vec<git2::Oid> = walk.collect::<std::result::Result<_, _>>()?;
+        let upstream = self
+            .repo
+            .head()
+            .ok()
+            .filter(|h| h.is_branch())
+            .and_then(|h| h.shorthand().map(str::to_string))
+            .and_then(|name| self.repo.find_branch(&name, git2::BranchType::Local).ok())
+            .and_then(|b| b.upstream().ok())
+            .and_then(|u| u.get().target());
+        let rewrites_pushed = upstream.is_some_and(|up| {
+            outgoing
+                .iter()
+                .any(|c| *c == up || self.repo.graph_descendant_of(up, *c).unwrap_or(false))
+        });
+
         Ok(MergePreview {
+            outgoing_count: outgoing.len(),
+            rewrites_pushed,
             source: source.to_string(),
             target: self.current_branch_name(),
             incoming_count: ids.len(),
@@ -220,6 +254,9 @@ impl GitRepo {
 
     /// The merge waiting to be finished, if any.
     pub fn merge_state(&self) -> Result<Option<MergeState>> {
+        if let Some(state) = self.rebase_state()? {
+            return Ok(Some(state));
+        }
         let dir = self.repo.path();
         let kind = if self.repo.state() == git2::RepositoryState::Merge {
             MergeKind::Merge
@@ -229,14 +266,18 @@ impl GitRepo {
             return Ok(None);
         };
         let file = match kind {
-            MergeKind::Merge => MERGE_MSG,
             MergeKind::Squash => SQUASH_MSG,
+            _ => MERGE_MSG,
         };
         let message = std::fs::read_to_string(dir.join(file)).unwrap_or_default();
         Ok(Some(MergeState {
             kind,
             message: message.trim_end().to_string(),
             conflicts: self.conflicted_paths()?,
+            branch: None,
+            onto: None,
+            step: 0,
+            total: 0,
         }))
     }
 
@@ -272,6 +313,9 @@ impl GitRepo {
     /// Cancels an in-progress merge, putting the branch and files back as
     /// they were before it started.
     pub fn abort_merge(&self) -> Result<()> {
+        if self.is_rebasing() {
+            return self.abort_rebase();
+        }
         if self.merge_state()?.is_none() {
             bail!("No merge in progress.");
         }
@@ -321,6 +365,191 @@ impl GitRepo {
         }
         index.write()?;
         Ok(())
+    }
+
+    fn is_rebasing(&self) -> bool {
+        matches!(
+            self.repo.state(),
+            git2::RepositoryState::Rebase
+                | git2::RepositoryState::RebaseMerge
+                | git2::RepositoryState::RebaseInteractive
+        )
+    }
+
+    /// Replays the current branch's own commits on top of branch `onto`.
+    /// Stops on the first commit that conflicts, leaving the rebase in
+    /// progress (see [`continue_rebase`](Self::continue_rebase)).
+    pub fn rebase(&self, onto: &str) -> Result<MergeOutcome> {
+        if self.merge_state()?.is_some() {
+            bail!("A merge or rebase is already in progress. Finish or abort it first.");
+        }
+        if self.has_uncommitted_changes()? {
+            bail!("Commit or discard your changes before rebasing.");
+        }
+        if self.current_branch_name().is_none() {
+            bail!("HEAD is detached; check out a branch first.");
+        }
+        let branch = self.find_any_branch(onto)?;
+        let upstream = self.repo.reference_to_annotated_commit(branch.get())?;
+        let head = self.repo.head()?.peel_to_commit()?;
+        if head.id() == upstream.id() || self.repo.graph_descendant_of(head.id(), upstream.id())? {
+            return Ok(MergeOutcome {
+                result: MergeResult::UpToDate,
+                commit_id: None,
+                conflicts: Vec::new(),
+            });
+        }
+        let mut rebase = self
+            .repo
+            .rebase(None, Some(&upstream), None, None)
+            .with_context(|| format!("failed to start rebasing onto {onto}"))?;
+        self.run_rebase(&mut rebase, None)
+    }
+
+    /// Continues a rebase stopped on conflicts: commits the resolved commit
+    /// (with `message`, or its original message) and replays the rest.
+    pub fn continue_rebase(&self, message: Option<&str>) -> Result<MergeOutcome> {
+        let mut rebase = self
+            .repo
+            .open_rebase(None)
+            .context("No rebase in progress.")?;
+        if !self.conflicted_paths()?.is_empty() {
+            bail!("Resolve all conflicts before continuing.");
+        }
+        if rebase.operation_current().is_some() {
+            self.commit_rebase_step(&mut rebase, message)?;
+        }
+        self.run_rebase(&mut rebase, None)
+    }
+
+    /// Drops the commit the rebase stopped on and goes on with the rest.
+    pub fn skip_rebase_commit(&self) -> Result<MergeOutcome> {
+        let mut rebase = self
+            .repo
+            .open_rebase(None)
+            .context("No rebase in progress.")?;
+        // Drop the step's changes. Not a hard reset: that would also end
+        // the rebase.
+        let tree = self.repo.head()?.peel_to_tree()?;
+        let mut index = self.repo.index()?;
+        index.read_tree(&tree)?;
+        index.write()?;
+        self.repo.checkout_index(
+            Some(&mut index),
+            Some(git2::build::CheckoutBuilder::new().force()),
+        )?;
+        self.run_rebase(&mut rebase, None)
+    }
+
+    fn abort_rebase(&self) -> Result<()> {
+        let mut rebase = self
+            .repo
+            .open_rebase(None)
+            .context("No rebase in progress.")?;
+        rebase.abort()?;
+        Ok(())
+    }
+
+    fn commit_rebase_step(
+        &self,
+        rebase: &mut git2::Rebase<'_>,
+        message: Option<&str>,
+    ) -> Result<()> {
+        let committer = self
+            .repo
+            .signature()
+            .context("no user.name/user.email configured for this repository")?;
+        match rebase.commit(None, &committer, message) {
+            Ok(_) => Ok(()),
+            // The change is already on the new base: nothing to commit.
+            Err(e) if e.code() == git2::ErrorCode::Applied => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Applies the remaining operations, committing each; stops on
+    /// conflicts, else finishes.
+    fn run_rebase(
+        &self,
+        rebase: &mut git2::Rebase<'_>,
+        message: Option<&str>,
+    ) -> Result<MergeOutcome> {
+        while let Some(op) = rebase.next() {
+            op?;
+            let conflicts = self.conflicted_paths()?;
+            if !conflicts.is_empty() {
+                return Ok(MergeOutcome {
+                    result: MergeResult::Conflicts,
+                    commit_id: None,
+                    conflicts,
+                });
+            }
+            self.commit_rebase_step(rebase, message)?;
+        }
+        let committer = self
+            .repo
+            .signature()
+            .context("no user.name/user.email configured for this repository")?;
+        rebase.finish(Some(&committer))?;
+        let head = self.repo.head()?.peel_to_commit()?;
+        Ok(MergeOutcome {
+            result: MergeResult::Committed,
+            commit_id: Some(head.id().to_string()),
+            conflicts: Vec::new(),
+        })
+    }
+
+    fn rebase_state(&self) -> Result<Option<MergeState>> {
+        if !self.is_rebasing() {
+            return Ok(None);
+        }
+        let dir = self.repo.path().join("rebase-merge");
+        let read = |name: &str| {
+            std::fs::read_to_string(dir.join(name))
+                .ok()
+                .map(|s| s.trim().to_string())
+        };
+        let branch =
+            read("head-name").map(|n| n.strip_prefix("refs/heads/").unwrap_or(&n).to_string());
+        let onto = read("onto").and_then(|id| {
+            let oid = git2::Oid::from_str(&id).ok()?;
+            self.branch_name_at(oid)
+                .or_else(|| Some(id.chars().take(7).collect()))
+        });
+        let mut rebase = self.repo.open_rebase(None)?;
+        let total = rebase.len();
+        let current = rebase.operation_current();
+        let message = current
+            .and_then(|i| rebase.nth(i))
+            .and_then(|op| self.repo.find_commit(op.id()).ok())
+            .and_then(|c| c.message().map(|m| m.trim_end().to_string()))
+            .unwrap_or_default();
+        Ok(Some(MergeState {
+            kind: MergeKind::Rebase,
+            message,
+            conflicts: self.conflicted_paths()?,
+            branch,
+            onto,
+            step: current.map_or(0, |i| i + 1),
+            total,
+        }))
+    }
+
+    /// A branch (local first) pointing at `oid`, for naming a commit.
+    fn branch_name_at(&self, oid: git2::Oid) -> Option<String> {
+        for kind in [git2::BranchType::Local, git2::BranchType::Remote] {
+            for entry in self.repo.branches(Some(kind)).ok()?.flatten() {
+                let (branch, _) = entry;
+                if branch.get().target() == Some(oid) {
+                    if let Ok(Some(name)) = branch.name() {
+                        if !name.ends_with("/HEAD") {
+                            return Some(name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn conflicted_paths(&self) -> Result<Vec<String>> {
@@ -473,6 +702,74 @@ mod tests {
             "one\nMAIN\nthree\n"
         );
         assert!(!dir.path().join("f.txt").exists());
+    }
+
+    #[test]
+    fn clean_rebase_replays_commits() {
+        let (dir, repo, main) = diverged(false);
+        repo.checkout_branch("feature").unwrap();
+        let preview = repo.merge_preview(&main).unwrap();
+        assert_eq!(preview.outgoing_count, 2);
+        assert!(!preview.rewrites_pushed);
+        let out = repo.rebase(&main).unwrap();
+        assert!(matches!(out.result, MergeResult::Committed));
+        // feature's two commits now sit on top of main's.
+        let head = head(&repo);
+        assert_eq!(head.message(), Some("f.txt"));
+        assert_eq!(head.parent_count(), 1);
+        assert!(dir.path().join("m.txt").exists());
+        assert!(repo.merge_state().unwrap().is_none());
+        assert_eq!(repo.repo.head().unwrap().shorthand(), Some("feature"));
+        assert!(matches!(
+            repo.rebase(&main).unwrap().result,
+            MergeResult::UpToDate
+        ));
+    }
+
+    #[test]
+    fn rebase_conflict_continue_and_abort() {
+        let (dir, repo, main) = diverged(true);
+        repo.checkout_branch("feature").unwrap();
+        let before = head(&repo).id();
+        let out = repo.rebase(&main).unwrap();
+        assert!(matches!(out.result, MergeResult::Conflicts));
+        let state = repo.merge_state().unwrap().unwrap();
+        assert!(matches!(state.kind, MergeKind::Rebase));
+        assert_eq!(state.branch.as_deref(), Some("feature"));
+        assert_eq!(state.onto.as_deref(), Some(main.as_str()));
+        assert_eq!((state.step, state.total), (1, 2));
+        assert_eq!(state.message, "a.txt");
+
+        // Abort puts feature back.
+        repo.abort_merge().unwrap();
+        assert!(repo.merge_state().unwrap().is_none());
+        assert_eq!(head(&repo).id(), before);
+
+        // Again, resolving this time.
+        repo.rebase(&main).unwrap();
+        repo.resolve_conflict("a.txt", "theirs").unwrap();
+        let out = repo.continue_rebase(None).unwrap();
+        assert!(matches!(out.result, MergeResult::Committed));
+        assert!(repo.merge_state().unwrap().is_none());
+        assert_eq!(head(&repo).message(), Some("f.txt"));
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "one\nFEATURE\nthree\n"
+        );
+    }
+
+    #[test]
+    fn rebase_skip_drops_the_conflicting_commit() {
+        let (dir, repo, main) = diverged(true);
+        repo.checkout_branch("feature").unwrap();
+        repo.rebase(&main).unwrap();
+        let out = repo.skip_rebase_commit().unwrap();
+        assert!(matches!(out.result, MergeResult::Committed));
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "one\nMAIN\nthree\n"
+        );
+        assert!(dir.path().join("f.txt").exists());
     }
 
     #[test]

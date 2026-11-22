@@ -9,7 +9,7 @@ import 'git_ffi.dart';
 import 'models.dart';
 
 /// How a branch is brought into the current one.
-enum MergeMode { merge, squash }
+enum MergeMode { merge, squash, rebase }
 
 /// What merging a branch into the current one would bring in.
 class MergePreview {
@@ -22,7 +22,9 @@ class MergePreview {
         incomingCount = json['incoming_count'] as int,
         upToDate = json['up_to_date'] as bool,
         canFastForward = json['can_fast_forward'] as bool,
-        dirty = json['dirty'] as bool;
+        dirty = json['dirty'] as bool,
+        outgoingCount = json['outgoing_count'] as int,
+        rewritesPushed = json['rewrites_pushed'] as bool;
 
   final String source;
   final String? target;
@@ -31,16 +33,34 @@ class MergePreview {
   final bool upToDate;
   final bool canFastForward;
   final bool dirty;
+
+  /// Commits on the current branch that a rebase would replay, and whether
+  /// any of them are pushed already.
+  final int outgoingCount;
+  final bool rewritesPushed;
 }
 
 /// A merge that stopped on conflicts.
 class MergeState {
   MergeState.fromJson(Map<String, dynamic> json)
       : isSquash = json['kind'] == 'squash',
+        isRebase = json['kind'] == 'rebase',
         message = json['message'] as String,
-        conflicts = (json['conflicts'] as List).cast<String>();
+        conflicts = (json['conflicts'] as List).cast<String>(),
+        branch = json['branch'] as String?,
+        onto = json['onto'] as String?,
+        step = json['step'] as int? ?? 0,
+        total = json['total'] as int? ?? 0;
 
   final bool isSquash;
+  final bool isRebase;
+
+  /// Rebase only: the branch being rebased, its new base, and the commit
+  /// being replayed (1-based) of [total].
+  final String? branch;
+  final String? onto;
+  final int step;
+  final int total;
   final String message;
   final List<String> conflicts;
 }
@@ -92,6 +112,42 @@ class MergeActions {
     }
   }
 
+  /// Runs a merge-like core call that returns an outcome, logging it.
+  static Future<MergeOutcome> _outcome(
+    String label,
+    Map<String, dynamic> Function(GitFfi ffi) call,
+  ) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) throw StateError(_missing());
+    try {
+      final json = await Isolate.run(() => call(ffi));
+      final outcome = (
+        result: json['result'] as String,
+        conflicts: (json['conflicts'] as List).cast<String>(),
+      );
+      ActionLog.instance.record(
+        label,
+        success: true,
+        detail: outcome.result == 'conflicts'
+            ? '${outcome.conflicts.length} conflicted file(s)'
+            : null,
+      );
+      return outcome;
+    } on GitFfiException catch (e) {
+      ActionLog.instance.record(label, success: false, detail: e.message);
+      rethrow;
+    }
+  }
+
+  static Future<MergeOutcome> rebase(String repo, String onto) =>
+      _outcome('rebase onto $onto', (ffi) => ffi.rebase(repo, onto));
+
+  static Future<MergeOutcome> continueRebase(String repo, String? message) =>
+      _outcome('continue rebase', (ffi) => ffi.continueRebase(repo, message));
+
+  static Future<MergeOutcome> skipRebaseCommit(String repo) =>
+      _outcome('skip rebase commit', (ffi) => ffi.skipRebaseCommit(repo));
+
   static Future<MergeState?> state(String repo) async {
     final ffi = GitFfi.instanceOrNull;
     if (ffi == null) return null;
@@ -128,18 +184,24 @@ Future<MergeOutcome?> showMergeDialog(
   BuildContext context, {
   required String repo,
   required String source,
+  MergeMode mode = MergeMode.merge,
 }) {
   return showDialog<MergeOutcome>(
     context: context,
-    builder: (_) => _MergeDialog(repo: repo, source: source),
+    builder: (_) => _MergeDialog(repo: repo, source: source, mode: mode),
   );
 }
 
 class _MergeDialog extends StatefulWidget {
-  const _MergeDialog({required this.repo, required this.source});
+  const _MergeDialog({
+    required this.repo,
+    required this.source,
+    required this.mode,
+  });
 
   final String repo;
   final String source;
+  final MergeMode mode;
 
   @override
   State<_MergeDialog> createState() => _MergeDialogState();
@@ -149,7 +211,7 @@ class _MergeDialogState extends State<_MergeDialog> {
   final _message = TextEditingController();
   MergePreview? _preview;
   String? _error;
-  MergeMode _mode = MergeMode.merge;
+  late MergeMode _mode = widget.mode;
   bool _noFastForward = false;
   bool _busy = false;
 
@@ -199,12 +261,14 @@ class _MergeDialogState extends State<_MergeDialog> {
         ? 'squash'
         : (_noFastForward ? 'no_ff' : 'merge');
     try {
-      final outcome = await MergeActions.merge(
-        widget.repo,
-        widget.source,
-        mode,
-        _message.text.trim(),
-      );
+      final outcome = _mode == MergeMode.rebase
+          ? await MergeActions.rebase(widget.repo, widget.source)
+          : await MergeActions.merge(
+              widget.repo,
+              widget.source,
+              mode,
+              _message.text.trim(),
+            );
       if (mounted) Navigator.of(context).pop(outcome);
     } on GitFfiException catch (e) {
       if (mounted) {
@@ -223,13 +287,15 @@ class _MergeDialogState extends State<_MergeDialog> {
     String t(String key) => translate(key)
         .replaceAll('{source}', widget.source)
         .replaceAll('{target}', _target)
-        .replaceAll('{count}', '${preview?.incomingCount ?? 0}');
+        .replaceAll('{count}', '${preview?.incomingCount ?? 0}')
+        .replaceAll('{outgoing}', '${preview?.outgoingCount ?? 0}');
+    final rebase = _mode == MergeMode.rebase;
     final bold = TextStyle(color: b.fg, fontWeight: FontWeight.w600);
     final canRun = preview != null &&
         !preview.upToDate &&
         !preview.dirty &&
         !_busy &&
-        _message.text.trim().isNotEmpty;
+        (rebase || _message.text.trim().isNotEmpty);
 
     Widget body;
     if (preview == null) {
@@ -253,9 +319,11 @@ class _MergeDialogState extends State<_MergeDialog> {
             TextSpan(
               style: TextStyle(color: b.muted, fontSize: 13),
               children: _withBold(
-                t(_mode == MergeMode.squash
-                    ? 'merge_squash_summary'
-                    : 'merge_summary'),
+                t(switch (_mode) {
+                  MergeMode.merge => 'merge_summary',
+                  MergeMode.squash => 'merge_squash_summary',
+                  MergeMode.rebase => 'rebase_summary',
+                }),
                 [widget.source, _target],
                 bold,
               ),
@@ -273,6 +341,10 @@ class _MergeDialogState extends State<_MergeDialog> {
                 value: MergeMode.squash,
                 label: Text(translate('merge_mode_squash')),
               ),
+              ButtonSegment(
+                value: MergeMode.rebase,
+                label: Text(translate('merge_mode_rebase')),
+              ),
             ],
             selected: {_mode},
             onSelectionChanged: _busy
@@ -284,13 +356,19 @@ class _MergeDialogState extends State<_MergeDialog> {
           ),
           const SizedBox(height: 6),
           Text(
-            translate(_mode == MergeMode.squash
-                ? 'merge_squash_hint'
-                : 'merge_merge_hint'),
+            translate(switch (_mode) {
+              MergeMode.merge => 'merge_merge_hint',
+              MergeMode.squash => 'merge_squash_hint',
+              MergeMode.rebase => 'rebase_hint',
+            }),
             style: TextStyle(color: b.muted, fontSize: 12),
           ),
+          if (rebase && preview.rewritesPushed) ...[
+            const SizedBox(height: 6),
+            Text(t('rebase_pushed_warning'), style: TextStyle(color: b.mod)),
+          ],
           const SizedBox(height: 12),
-          for (final c in shown)
+          for (final c in rebase ? const <CommitEntry>[] : shown)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Row(
@@ -308,7 +386,7 @@ class _MergeDialogState extends State<_MergeDialog> {
                 ],
               ),
             ),
-          if (preview.incomingCount > shown.length)
+          if (!rebase && preview.incomingCount > shown.length)
             Text(
               translate('merge_more_commits').replaceAll(
                 '{count}',
@@ -317,9 +395,10 @@ class _MergeDialogState extends State<_MergeDialog> {
               style: TextStyle(color: b.muted, fontSize: 12),
             ),
           const SizedBox(height: 12),
-          if (!(_mode == MergeMode.merge &&
-              preview.canFastForward &&
-              !_noFastForward))
+          if (!rebase &&
+              !(_mode == MergeMode.merge &&
+                  preview.canFastForward &&
+                  !_noFastForward))
             TextField(
               controller: _message,
               minLines: 1,
@@ -359,7 +438,7 @@ class _MergeDialogState extends State<_MergeDialog> {
     }
 
     return AlertDialog(
-      title: Text(t('merge_title')),
+      title: Text(t(rebase ? 'rebase_title' : 'merge_title')),
       content: SizedBox(width: 420, child: SingleChildScrollView(child: body)),
       actions: [
         TextButton(
@@ -371,9 +450,11 @@ class _MergeDialogState extends State<_MergeDialog> {
         if (preview != null && !preview.upToDate)
           FilledButton(
             onPressed: canRun ? _run : null,
-            child: Text(translate(_mode == MergeMode.squash
-                ? 'merge_mode_squash'
-                : 'merge_mode_merge')),
+            child: Text(translate(switch (_mode) {
+              MergeMode.merge => 'merge_mode_merge',
+              MergeMode.squash => 'merge_mode_squash',
+              MergeMode.rebase => 'merge_mode_rebase',
+            })),
           ),
       ],
     );

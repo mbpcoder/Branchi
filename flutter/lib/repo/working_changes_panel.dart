@@ -86,6 +86,7 @@ class WorkingChangesDetail extends StatefulWidget {
     this.mergeState,
     this.onResolveConflict,
     this.onAbortMerge,
+    this.onSkipRebaseCommit,
   });
 
   final List<StatusEntry> status;
@@ -114,6 +115,7 @@ class WorkingChangesDetail extends StatefulWidget {
   final MergeState? mergeState;
   final Future<void> Function(String file, String side)? onResolveConflict;
   final Future<void> Function()? onAbortMerge;
+  final Future<void> Function()? onSkipRebaseCommit;
 
   @override
   State<WorkingChangesDetail> createState() => _WorkingChangesDetailState();
@@ -274,6 +276,13 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
       (widget.status.any((e) => e.isStaged) ||
           (widget.mergeState != null && !widget.mergeState!.isSquash));
 
+  /// Text of the Commit button while a merge, squash or rebase waits.
+  String _finishLabel(MergeState merge) => translate(merge.isRebase
+      ? 'rebase_continue'
+      : merge.isSquash
+          ? 'merge_finish_squash'
+          : 'merge_finish');
+
   Future<void> _commit({required bool push}) async {
     if (!_canCommit) return;
     setState(() => _isCommitting = true);
@@ -428,6 +437,7 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
           _MergeBanner(
             state: merge,
             onAbort: busy ? null : widget.onAbortMerge,
+            onSkip: busy || !merge.isRebase ? null : widget.onSkipRebaseCommit,
           ),
           if (merge.conflicts.isNotEmpty) ...[
             _SectionHeader(
@@ -498,7 +508,7 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
     final branch = widget.branchName;
     final merge = widget.mergeState;
     final commitLabel = merge != null
-        ? translate(merge.isSquash ? 'merge_finish_squash' : 'merge_finish')
+        ? _finishLabel(merge)
         : branch == null || branch.isEmpty
             ? translate('changes_commit')
             : translate('changes_commit_to').replaceAll('{branch}', branch);
@@ -550,7 +560,9 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
                 items: [
                   PopupMenuItem(
                     value: 'push',
-                    enabled: canCommit && widget.canPush,
+                    enabled: canCommit &&
+                        widget.canPush &&
+                        !(merge?.isRebase ?? false),
                     child: Text(translate('changes_commit_and_push')),
                   ),
                 ],
@@ -688,59 +700,99 @@ class _WorkingChangesDetailState extends State<WorkingChangesDetail> {
 
 /// "Merging … · 2 files still have conflicts" with an Abort button.
 class _MergeBanner extends StatelessWidget {
-  const _MergeBanner({required this.state, required this.onAbort});
+  const _MergeBanner({
+    required this.state,
+    required this.onAbort,
+    required this.onSkip,
+  });
 
   final MergeState state;
   final Future<void> Function()? onAbort;
+
+  /// Rebase only: drop the commit being replayed.
+  final Future<void> Function()? onSkip;
 
   @override
   Widget build(BuildContext context) {
     final b = context.branchi;
     final count = state.conflicts.length;
-    final title = state.message.split('\n').first;
+    final title = state.isRebase
+        ? translate('rebase_banner')
+            .replaceAll('{branch}', state.branch ?? 'HEAD')
+            .replaceAll('{onto}', state.onto ?? '?')
+            .replaceAll('{step}', '${state.step}')
+            .replaceAll('{total}', '${state.total}')
+        : state.message.split('\n').first;
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+      padding: const EdgeInsets.fromLTRB(12, 10, 4, 2),
       decoration: BoxDecoration(
         color: b.mod.withValues(alpha: 0.08),
         border: Border.all(color: b.mod.withValues(alpha: 0.35)),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Icon(
-            count == 0 ? Icons.check_circle_outline : Icons.warning_amber,
-            size: 16,
-            color: count == 0 ? b.add : b.mod,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: b.fg, fontWeight: FontWeight.w600),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: Icon(
+                  count == 0 ? Icons.check_circle_outline : Icons.warning_amber,
+                  size: 16,
+                  color: count == 0 ? b.add : b.mod,
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  count == 0
-                      ? translate('merge_all_resolved')
-                      : translate('merge_conflicts_left')
-                          .replaceAll('{count}', '$count'),
-                  style: TextStyle(color: b.muted, fontSize: 12),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: b.fg,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      count == 0
+                          ? translate('merge_all_resolved')
+                          : translate('merge_conflicts_left')
+                              .replaceAll('{count}', '$count'),
+                      style: TextStyle(color: b.muted, fontSize: 12),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: onAbort == null ? null : () => onAbort!(),
-            style: TextButton.styleFrom(foregroundColor: b.del),
-            child: Text(translate(
-              state.isSquash ? 'merge_abort_squash' : 'merge_abort',
-            )),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (state.isRebase)
+                Tooltip(
+                  message: translate('rebase_skip_tip'),
+                  child: TextButton(
+                    onPressed: onSkip == null ? null : () => onSkip!(),
+                    child: Text(translate('rebase_skip')),
+                  ),
+                ),
+              TextButton(
+                onPressed: onAbort == null ? null : () => onAbort!(),
+                style: TextButton.styleFrom(foregroundColor: b.del),
+                child: Text(translate(state.isRebase
+                    ? 'rebase_abort'
+                    : state.isSquash
+                        ? 'merge_abort_squash'
+                        : 'merge_abort')),
+              ),
+            ],
           ),
         ],
       ),

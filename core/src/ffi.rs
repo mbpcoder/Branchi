@@ -747,3 +747,47 @@ pub unsafe extern "C" fn branchi_resolve_conflict(
     let result = GitRepo::open(&path).and_then(|repo| repo.resolve_conflict(&file, &side));
     result_to_c_string(result)
 }
+
+/// Rebases the current branch onto branch `onto`. Returns
+/// `{"ok": MergeOutcome}` or `{"error": "..."}`.
+///
+/// # Safety
+/// `path` and `onto` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_rebase(path: *const c_char, onto: *const c_char) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let onto = c_str_to_string(onto);
+    let result = GitRepo::open(&path).and_then(|repo| repo.rebase(&onto));
+    result_to_json_c_string(result)
+}
+
+/// Continues a stopped rebase, committing the resolved step with `message`
+/// (null keeps the original). Returns `{"ok": MergeOutcome}` or an error.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string; `message` must be
+/// null or one. Both must outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_continue_rebase(
+    path: *const c_char,
+    message: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let message = (!message.is_null()).then(|| c_str_to_string(message));
+    let result = GitRepo::open(&path).and_then(|repo| repo.continue_rebase(message.as_deref()));
+    result_to_json_c_string(result)
+}
+
+/// Skips the commit a rebase stopped on. Returns `{"ok": MergeOutcome}` or
+/// an error.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
+/// call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_skip_rebase_commit(path: *const c_char) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let result = GitRepo::open(&path).and_then(|repo| repo.skip_rebase_commit());
+    result_to_json_c_string(result)
+}

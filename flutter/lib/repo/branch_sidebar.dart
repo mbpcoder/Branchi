@@ -400,11 +400,15 @@ class _BranchSidebarState extends State<BranchSidebar> {
   }
 
   /// Merges [source] into the current branch after asking how.
-  Future<void> _merge(String source) async {
+  Future<void> _merge(
+    String source, {
+    MergeMode mode = MergeMode.merge,
+  }) async {
     final outcome = await showMergeDialog(
       context,
       repo: widget.repoPath,
       source: source,
+      mode: mode,
     );
     if (!mounted || outcome == null) return;
     widget.onChanged();
@@ -448,6 +452,13 @@ class _BranchSidebarState extends State<BranchSidebar> {
                 .replaceAll('{source}', branch.name)
                 .replaceAll('{target}', current)),
           ),
+        if (canMergeIn)
+          PopupMenuItem(
+            value: 'rebase',
+            child: Text(translate('rebase_menu')
+                .replaceAll('{source}', branch.name)
+                .replaceAll('{target}', current)),
+          ),
         if (base != null)
           PopupMenuItem(
             value: 'merge_base',
@@ -474,6 +485,9 @@ class _BranchSidebarState extends State<BranchSidebar> {
         break;
       case 'merge':
         await _merge(branch.name);
+        break;
+      case 'rebase':
+        await _merge(branch.name, mode: MergeMode.rebase);
         break;
       case 'merge_base':
         await _merge(base!);

@@ -11,6 +11,7 @@ import 'column_resize_handle.dart';
 import 'commit_detail.dart';
 import 'commit_list.dart';
 import 'git_actions.dart';
+import 'git_ffi.dart';
 import 'merge.dart';
 import 'models.dart';
 import 'panel_layout_store.dart';
@@ -329,6 +330,11 @@ class RepositoryViewState extends State<RepositoryView> {
 
   /// Resolves a conflicted file by taking one side (`ours` / `theirs`).
   Future<void> _resolveConflict(String file, String side) async {
+    // During a rebase git's "ours" is the new base; the user's own
+    // commit is "theirs".
+    if (_mergeState?.isRebase ?? false) {
+      side = side == 'ours' ? 'theirs' : 'ours';
+    }
     final error = await MergeActions.resolve(widget.path, file, side);
     if (!mounted) return;
     if (error != null) _showError(error);
@@ -397,7 +403,23 @@ class RepositoryViewState extends State<RepositoryView> {
     return result.isSuccess;
   }
 
+  /// Continues (or with [skip], skips a commit of) a stopped rebase.
+  Future<bool> _continueRebase(String? message, {bool skip = false}) async {
+    try {
+      final outcome = skip
+          ? await MergeActions.skipRebaseCommit(widget.path)
+          : await MergeActions.continueRebase(widget.path, message);
+      if (!mounted) return false;
+      await Future.wait([_loadStatus(), _loadRepository(showSpinner: false)]);
+      return outcome.result != 'conflicts';
+    } on GitFfiException catch (e) {
+      if (mounted) _showError(e.message);
+      return false;
+    }
+  }
+
   Future<bool> _commit(String message) async {
+    if (_mergeState?.isRebase ?? false) return _continueRebase(message);
     final result = await GitActions.commit(widget.path, message);
     if (!mounted) return false;
     if (result.isSuccess) {
@@ -504,6 +526,7 @@ class RepositoryViewState extends State<RepositoryView> {
           time: hunk.time,
         ),
         repoPath: widget.path,
+        rebasing: _mergeState?.isRebase ?? false,
         onLanguageChanged: widget.onLanguageChanged,
       );
     }
@@ -529,6 +552,9 @@ class RepositoryViewState extends State<RepositoryView> {
         mergeState: _mergeState,
         onResolveConflict: _resolveConflict,
         onAbortMerge: _abortMerge,
+        onSkipRebaseCommit: () async {
+          await _continueRebase(null, skip: true);
+        },
         loadDiff: (entry, {required staged}) =>
             GitActions.workingDiff(widget.path, entry.path, staged: staged),
       );

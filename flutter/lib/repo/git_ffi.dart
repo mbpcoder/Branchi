@@ -402,6 +402,13 @@ class GitFfi {
         _resolveConflict = lib.lookupFunction<_Str3, _Str3>(
           'branchi_resolve_conflict',
         ),
+        _rebase = lib.lookupFunction<_Str2, _Str2>('branchi_rebase'),
+        _continueRebase = lib.lookupFunction<_Str2, _Str2>(
+          'branchi_continue_rebase',
+        ),
+        _skipRebase = lib.lookupFunction<_Str1, _Str1>(
+          'branchi_skip_rebase_commit',
+        ),
         _setPruneOnFetch =
             lib.lookupFunction<_SetPruneOnFetchNative, _SetPruneOnFetchDart>(
           'branchi_set_prune_on_fetch',
@@ -477,6 +484,25 @@ class GitFfi {
   final _Str1 _mergeState;
   final _Str1 _abortMerge;
   final _Str3 _resolveConflict;
+  final _Str2 _rebase;
+  final _Str2 _continueRebase;
+  final _Str1 _skipRebase;
+
+  /// Rebases the current branch onto [onto]; returns the decoded outcome.
+  Map<String, dynamic> rebase(String path, String onto) =>
+      _withStrings([path, onto], (p) => _consumeJsonMap(_rebase(p[0], p[1])));
+
+  /// Continues a stopped rebase; [message] null keeps the commit's own.
+  Map<String, dynamic> continueRebase(String path, String? message) =>
+      _withStrings([path, ?message], (p) {
+        return _consumeJsonMap(
+          _continueRebase(p[0], p.length > 1 ? p[1] : nullptr),
+        );
+      });
+
+  /// Skips the commit the rebase stopped on.
+  Map<String, dynamic> skipRebaseCommit(String path) =>
+      _withStrings([path], (p) => _consumeJsonMap(_skipRebase(p[0])));
 
   /// Runs [call] with [args] as native strings, freeing them afterwards.
   T _withStrings<T>(List<String> args, T Function(List<Pointer<Utf8>>) call) {

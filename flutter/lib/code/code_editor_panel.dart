@@ -120,6 +120,7 @@ class CodeEditorPanel extends StatefulWidget {
     this.initialFilePath,
     this.onLanguageChanged,
     this.repoRoot,
+    this.rebasing = false,
     this.onOpenCommit,
   });
 
@@ -127,6 +128,9 @@ class CodeEditorPanel extends StatefulWidget {
 
   /// The repository the files belong to, for blame in the footer.
   final String? repoRoot;
+
+  /// During a rebase the lower conflict block is the user's own commit.
+  final bool rebasing;
 
   /// Opens a commit (from the footer's blame) in the History view.
   final ValueChanged<BlameHunk>? onOpenCommit;
@@ -760,6 +764,7 @@ class CodeEditorPanelState extends State<CodeEditorPanel> {
               key: ValueKey('conflicts:${active.path}'),
               controller: active.controller,
               showResolved: _hadConflicts.contains(active.path),
+              mineIsBottom: widget.rebasing,
               onDismissResolved: () =>
                   setState(() => _hadConflicts.remove(active.path)),
               onMarkResolved: widget.repoRoot == null

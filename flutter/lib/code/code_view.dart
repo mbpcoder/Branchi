@@ -25,10 +25,15 @@ class CodeView extends StatefulWidget {
     super.key,
     required this.repoPath,
     this.onLanguageChanged,
+    this.rebasing = false,
     this.onOpenCommit,
   });
 
   final String repoPath;
+
+  /// Whether a rebase is in progress, which swaps which conflict side is
+  /// "mine".
+  final bool rebasing;
 
   /// Opens a commit in the History view (from the editor footer's blame).
   final ValueChanged<BlameHunk>? onOpenCommit;
@@ -192,6 +197,7 @@ class CodeViewState extends State<CodeView> {
             child: CodeEditorPanel(
               key: _editorKey,
               repoRoot: widget.repoPath,
+              rebasing: widget.rebasing,
               onLanguageChanged: widget.onLanguageChanged,
               onOpenCommit: widget.onOpenCommit,
             ),
