@@ -41,6 +41,19 @@ pub struct CommitInfo {
     pub parent_ids: Vec<String>,
 }
 
+static PRUNE_ON_FETCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Whether fetches remove remote-tracking branches that were deleted on the
+/// remote (`git fetch --prune`). On by default; the app sets it from its
+/// settings.
+pub fn set_prune_on_fetch(enabled: bool) {
+    PRUNE_ON_FETCH.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn prune_on_fetch() -> bool {
+    PRUNE_ON_FETCH.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// A run of lines last changed by the same commit, from [`GitRepo::blame`].
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct BlameHunk {
@@ -65,6 +78,9 @@ pub struct BranchInfo {
     /// `origin/main`), or `None` when it isn't merged or is the default
     /// branch itself. See [`GitRepo::default_branch`].
     pub merged_into: Option<String>,
+    /// When the branch's tip commit was made (committer time), for sorting
+    /// by recent activity. Git doesn't record when a branch was created.
+    pub last_commit_time: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -472,11 +488,18 @@ impl GitRepo {
                 _ => None,
             };
 
+            let last_commit_time = branch
+                .get()
+                .peel_to_commit()
+                .ok()
+                .and_then(|c| DateTime::<Utc>::from_timestamp(c.time().seconds(), 0));
+
             result.push(BranchInfo {
                 name,
                 is_head,
                 is_remote,
                 merged_into,
+                last_commit_time,
             });
         }
 
@@ -647,6 +670,10 @@ impl GitRepo {
 
         let mut fetch_options = git2::FetchOptions::new();
         fetch_options.remote_callbacks(callbacks);
+        if prune_on_fetch() {
+            // Drop remote-tracking branches deleted on the server.
+            fetch_options.prune(git2::FetchPrune::On);
+        }
 
         remote
             .fetch(&[] as &[&str], Some(&mut fetch_options), None)
@@ -2007,6 +2034,42 @@ mod tests {
         let log = local_repo.log(10).unwrap();
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].summary, "second");
+    }
+
+    #[test]
+    fn fetch_prunes_branches_deleted_on_the_remote() {
+        let remote_dir = tempfile::tempdir().unwrap();
+        let remote_repo = GitRepo::init(remote_dir.path()).unwrap();
+        write_file(remote_dir.path(), "a.txt", "one");
+        remote_repo.stage("a.txt").unwrap();
+        remote_repo
+            .commit("init", "Test User", "test@example.com")
+            .unwrap();
+        let head = remote_repo.repo.head().unwrap().peel_to_commit().unwrap();
+        remote_repo.repo.branch("feature", &head, false).unwrap();
+
+        let local_dir = tempfile::tempdir().unwrap();
+        let local_repo =
+            GitRepo::clone(remote_dir.path().to_str().unwrap(), local_dir.path()).unwrap();
+        let remote_names = |repo: &GitRepo| -> Vec<String> {
+            repo.branches()
+                .unwrap()
+                .into_iter()
+                .filter(|b| b.is_remote)
+                .map(|b| b.name)
+                .collect()
+        };
+        assert!(remote_names(&local_repo).contains(&"origin/feature".to_string()));
+        assert!(local_repo.branches().unwrap()[0].last_commit_time.is_some());
+
+        remote_repo
+            .repo
+            .find_branch("feature", git2::BranchType::Local)
+            .unwrap()
+            .delete()
+            .unwrap();
+        local_repo.fetch_remote_for_branch("origin/HEAD").unwrap();
+        assert!(!remote_names(&local_repo).contains(&"origin/feature".to_string()));
     }
 
     #[test]

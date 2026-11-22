@@ -62,14 +62,17 @@ class BranchEntry {
     required this.isHead,
     required this.isRemote,
     this.mergedInto,
+    this.lastCommitTime,
   });
 
   factory BranchEntry.fromJson(Map<String, dynamic> json) {
+    final time = json['last_commit_time'] as String?;
     return BranchEntry(
       name: json['name'] as String,
       isHead: json['is_head'] as bool,
       isRemote: json['is_remote'] as bool,
       mergedInto: json['merged_into'] as String?,
+      lastCommitTime: time == null ? null : DateTime.parse(time),
     );
   }
 
@@ -80,6 +83,9 @@ class BranchEntry {
   /// The default branch (e.g. `origin/main`) this branch is already fully
   /// merged into, or null when it isn't merged.
   final String? mergedInto;
+
+  /// When the branch's latest commit was made; used to sort by activity.
+  final DateTime? lastCommitTime;
 
   bool get isMerged => mergedInto != null;
 }

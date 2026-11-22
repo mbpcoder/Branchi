@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/app_locale.dart';
 import '../theme/app_theme.dart';
@@ -118,12 +119,79 @@ class BranchSidebar extends StatefulWidget {
   State<BranchSidebar> createState() => _BranchSidebarState();
 }
 
+/// How the sidebar orders branches within each group.
+enum BranchSort {
+  name,
+
+  /// Newest last commit first. (Git doesn't record when a branch was
+  /// created, so recent activity is the closest useful order.)
+  lastCommit,
+}
+
+/// Orders [branches] by [sort]; names break ties, case-insensitively.
+List<BranchEntry> sortBranches(List<BranchEntry> branches, BranchSort sort) {
+  int byName(BranchEntry a, BranchEntry b) =>
+      a.name.toLowerCase().compareTo(b.name.toLowerCase());
+  return List.of(branches)
+    ..sort((a, b) {
+      if (sort == BranchSort.lastCommit) {
+        final at = a.lastCommitTime;
+        final bt = b.lastCommitTime;
+        if (at != null && bt != null && at != bt) return bt.compareTo(at);
+        if ((at == null) != (bt == null)) return at == null ? 1 : -1;
+      }
+      return byName(a, b);
+    });
+}
+
 class _BranchSidebarState extends State<BranchSidebar> {
+  static const _sortKeyPrefix = 'branchi_branch_sort_';
+  BranchSort _sort = BranchSort.name;
+
   bool _localExpanded = true;
   bool _remoteExpanded = true;
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSort();
+  }
+
+  @override
+  void didUpdateWidget(covariant BranchSidebar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.repoPath != widget.repoPath) _loadSort();
+  }
+
+  Future<void> _loadSort() async {
+    final repo = widget.repoPath;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString(_sortKeyPrefix + repo);
+      if (!mounted || repo != widget.repoPath) return;
+      setState(() {
+        _sort = BranchSort.values.firstWhere(
+          (v) => v.name == saved,
+          orElse: () => BranchSort.name,
+        );
+      });
+    } catch (_) {
+      // Keep the default order.
+    }
+  }
+
+  Future<void> _setSort(BranchSort sort) async {
+    setState(() => _sort = sort);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_sortKeyPrefix + widget.repoPath, sort.name);
+    } catch (_) {
+      // Applies for now; not remembered.
+    }
+  }
 
   @override
   void dispose() {
@@ -354,6 +422,17 @@ class _BranchSidebarState extends State<BranchSidebar> {
         Offset.zero & overlay.size,
       ),
       items: [
+        CheckedPopupMenuItem(
+          value: 'sort_name',
+          checked: _sort == BranchSort.name,
+          child: Text(translate('branch_sort_name')),
+        ),
+        CheckedPopupMenuItem(
+          value: 'sort_last_commit',
+          checked: _sort == BranchSort.lastCommit,
+          child: Text(translate('branch_sort_last_commit')),
+        ),
+        const PopupMenuDivider(),
         PopupMenuItem(
           value: 'watch',
           child: Text(
@@ -376,6 +455,12 @@ class _BranchSidebarState extends State<BranchSidebar> {
     );
     if (!mounted || action == null) return;
     switch (action) {
+      case 'sort_name':
+        await _setSort(BranchSort.name);
+        break;
+      case 'sort_last_commit':
+        await _setSort(BranchSort.lastCommit);
+        break;
       case 'watch':
         await _selectWatchInterval(position);
         break;
@@ -404,14 +489,20 @@ class _BranchSidebarState extends State<BranchSidebar> {
   Widget build(BuildContext context) {
     final b = context.branchi;
     final query = _searchQuery.trim().toLowerCase();
-    final local = widget.branches
-        .where((e) => !e.isRemote)
-        .where((e) => query.isEmpty || e.name.toLowerCase().contains(query))
-        .toList();
-    final remote = widget.branches
-        .where((e) => e.isRemote)
-        .where((e) => query.isEmpty || e.name.toLowerCase().contains(query))
-        .toList();
+    final local = sortBranches(
+      widget.branches
+          .where((e) => !e.isRemote)
+          .where((e) => query.isEmpty || e.name.toLowerCase().contains(query))
+          .toList(),
+      _sort,
+    );
+    final remote = sortBranches(
+      widget.branches
+          .where((e) => e.isRemote)
+          .where((e) => query.isEmpty || e.name.toLowerCase().contains(query))
+          .toList(),
+      _sort,
+    );
 
     // Group remote branches by remote name ("origin/main" -> "origin").
     final remotesByName = <String, List<BranchEntry>>{};

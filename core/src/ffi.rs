@@ -593,6 +593,13 @@ pub unsafe extern "C" fn branchi_blame(
     result_to_json_c_string(result)
 }
 
+/// Sets whether fetches (Fetch, Pull, auto-pull) remove remote-tracking
+/// branches that were deleted on the remote. On by default.
+#[no_mangle]
+pub extern "C" fn branchi_set_prune_on_fetch(enabled: bool) {
+    git::set_prune_on_fetch(enabled);
+}
+
 /// Releases a string previously returned by one of this module's
 /// functions. Safe to call with a null pointer (no-op).
 ///

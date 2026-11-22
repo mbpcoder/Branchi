@@ -106,6 +106,7 @@ class _BranchWatcherSectionState extends State<BranchWatcherSection> {
           listenable: Listenable.merge([
             WatcherPreferences.onlyWhenClean,
             WatcherPreferences.notifyOnNewCommits,
+            WatcherPreferences.pruneOnFetch,
           ]),
           builder: (context, _) => HairlineList(
             children: [
@@ -120,6 +121,12 @@ class _BranchWatcherSectionState extends State<BranchWatcherSection> {
                 hint: translate('watcher_notify_new_commits_hint'),
                 value: WatcherPreferences.notifyOnNewCommits.value,
                 onChanged: WatcherPreferences.setNotifyOnNewCommits,
+              ),
+              SettingsToggleRow(
+                title: translate('watcher_prune'),
+                hint: translate('watcher_prune_hint'),
+                value: WatcherPreferences.pruneOnFetch.value,
+                onChanged: WatcherPreferences.setPruneOnFetch,
               ),
             ],
           ),

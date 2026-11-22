@@ -9,6 +9,7 @@ import 'l10n/app_calendar.dart';
 import 'l10n/app_locale.dart';
 import 'logs/file_logger.dart';
 import 'settings/shell_preferences.dart';
+import 'settings/watcher_preferences.dart';
 import 'theme/app_theme.dart';
 import 'update/update_service.dart';
 
@@ -42,6 +43,8 @@ Future<void> main() async {
     await AppTheme.load();
     await ShellPreferences.load();
     await UpdateService.load();
+    // Applies "remove deleted remote branches" to the core before any fetch.
+    await WatcherPreferences.ensureLoaded();
     runApp(const BranchiApp());
     unawaited(UpdateService.checkOnStartup());
   }, (error, stack) {

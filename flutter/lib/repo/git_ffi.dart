@@ -75,6 +75,9 @@ typedef _BlameDart = Pointer<Utf8> Function(
   Pointer<Utf8> contents,
 );
 
+typedef _SetPruneOnFetchNative = Void Function(Bool enabled);
+typedef _SetPruneOnFetchDart = void Function(bool enabled);
+
 typedef _IsRepositoryNative = Bool Function(Pointer<Utf8> path);
 typedef _IsRepositoryDart = bool Function(Pointer<Utf8> path);
 
@@ -371,6 +374,10 @@ class GitFfi {
         _globalConfigSet = lib.lookupFunction<_GlobalConfigSetNative,
             _GlobalConfigSetDart>('branchi_global_config_set'),
         _blame = lib.lookupFunction<_BlameNative, _BlameDart>('branchi_blame'),
+        _setPruneOnFetch =
+            lib.lookupFunction<_SetPruneOnFetchNative, _SetPruneOnFetchDart>(
+          'branchi_set_prune_on_fetch',
+        ),
         _searchContent =
             lib.lookupFunction<_SearchContentNative, _SearchContentDart>(
           'branchi_search_content',
@@ -436,6 +443,11 @@ class GitFfi {
   final _FindFilesDart _findFiles;
   final _SearchContentDart _searchContent;
   final _BlameDart _blame;
+  final _SetPruneOnFetchDart _setPruneOnFetch;
+
+  /// Whether fetches (Fetch, Pull, auto-pull) remove remote branches that
+  /// were deleted on the remote. On by default in the core.
+  void setPruneOnFetch(bool enabled) => _setPruneOnFetch(enabled);
   final _FreeStringDart _freeString;
 
   /// Runs `git init` at [path] via the Rust core. Returns null on success,
