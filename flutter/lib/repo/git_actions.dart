@@ -4,6 +4,7 @@ import 'dart:isolate';
 import 'package:path/path.dart' as p;
 
 import '../logs/action_log.dart';
+import 'branch_base_prefs.dart';
 import 'git_ffi.dart';
 import '../report/report_data.dart';
 import 'models.dart';
@@ -134,12 +135,16 @@ class GitActions {
     );
   }
 
-  /// Local and remote-tracking branches.
+  /// Local and remote-tracking branches. Local ones are compared with the
+  /// repo's chosen base branch (see [BranchBasePrefs]).
   static Future<List<BranchEntry>> branches(String path) async {
     final ffi = GitFfi.instanceOrNull;
     if (ffi == null) throw StateError(_missingLibraryErrorWithPaths());
 
-    final raw = await Isolate.run(() => ffi.branches(path));
+    final compareBase = await BranchBasePrefs.load(path);
+    final raw = await Isolate.run(
+      () => ffi.branches(path, compareBase: compareBase),
+    );
     return raw
         .cast<Map<String, dynamic>>()
         .map(BranchEntry.fromJson)

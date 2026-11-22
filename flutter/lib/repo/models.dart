@@ -66,6 +66,9 @@ class BranchEntry {
     this.remoteCounterpart,
     this.ahead = 0,
     this.behind = 0,
+    this.base,
+    this.baseAhead = 0,
+    this.baseBehind = 0,
   });
 
   factory BranchEntry.fromJson(Map<String, dynamic> json) {
@@ -79,6 +82,9 @@ class BranchEntry {
       remoteCounterpart: json['remote_counterpart'] as String?,
       ahead: json['ahead'] as int? ?? 0,
       behind: json['behind'] as int? ?? 0,
+      base: json['base'] as String?,
+      baseAhead: json['base_ahead'] as int? ?? 0,
+      baseBehind: json['base_behind'] as int? ?? 0,
     );
   }
 
@@ -100,6 +106,13 @@ class BranchEntry {
   /// Commits to push to / pull from [remoteCounterpart].
   final int ahead;
   final int behind;
+
+  /// For a local branch other than the base: the branch it's compared with
+  /// (e.g. `origin/main`) and how many commits it has that the base doesn't
+  /// ([baseAhead]) and the reverse ([baseBehind]). Null base = no counts.
+  final String? base;
+  final int baseAhead;
+  final int baseBehind;
 
   bool get isMerged => mergedInto != null;
 }

@@ -123,6 +123,25 @@ pub unsafe extern "C" fn branchi_branches(path: *const c_char) -> *mut c_char {
     result_to_json_c_string(result)
 }
 
+/// Like [`branchi_branches`], with local branches' `base_ahead` /
+/// `base_behind` counted against `compare_base` (a branch name) instead of
+/// the default branch. `compare_base` may be null for the default.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string; `compare_base`
+/// must be null or one. Both must outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_branches_compared_with(
+    path: *const c_char,
+    compare_base: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let compare_base = (!compare_base.is_null()).then(|| c_str_to_string(compare_base));
+    let result =
+        GitRepo::open(&path).and_then(|repo| repo.branches_compared_with(compare_base.as_deref()));
+    result_to_json_c_string(result)
+}
+
 /// Returns the file-level diff of `commit_id` against its first parent (or
 /// the empty tree, for a root commit) as a JSON string:
 /// `{"ok": [DiffFileEntry, ...]}` or `{"error": "..."}`.

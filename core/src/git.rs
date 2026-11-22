@@ -88,6 +88,12 @@ pub struct BranchInfo {
     /// push), and the reverse (to pull). 0 without a counterpart.
     pub ahead: usize,
     pub behind: usize,
+    /// For a local branch other than the base itself: the branch it is
+    /// compared with (e.g. `origin/main`), and how many commits it has that
+    /// the base doesn't (`base_ahead`) and the reverse (`base_behind`).
+    pub base: Option<String>,
+    pub base_ahead: usize,
+    pub base_behind: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -451,6 +457,14 @@ impl GitRepo {
     /// Local and remote-tracking branches, each marked with whether it is
     /// already merged into the default branch.
     pub fn branches(&self) -> Result<Vec<BranchInfo>> {
+        self.branches_compared_with(None)
+    }
+
+    /// Like [`branches`](Self::branches), with each local branch's
+    /// ahead/behind counted against `compare_base` (a local or remote
+    /// branch name) instead of the default branch. An unknown name falls
+    /// back to the default branch.
+    pub fn branches_compared_with(&self, compare_base: Option<&str>) -> Result<Vec<BranchInfo>> {
         let head_name = self
             .repo
             .head()
@@ -463,6 +477,28 @@ impl GitRepo {
         // `origin/main`, and the reverse) is the same line of work, so it
         // isn't marked as merged either.
         let base_names: Vec<String> = match &base {
+            Some((name, _)) => match name.split_once('/') {
+                Some((_, short)) if self.is_remote_branch(name) => {
+                    vec![name.clone(), short.to_string()]
+                }
+                _ => vec![name.clone()],
+            },
+            None => Vec::new(),
+        };
+
+        // What local branches are counted against: the chosen branch, else
+        // the default branch. Its own rows (both sides) show no counts.
+        let compare = compare_base
+            .and_then(|name| {
+                let branch = self
+                    .repo
+                    .find_branch(name, git2::BranchType::Local)
+                    .or_else(|_| self.repo.find_branch(name, git2::BranchType::Remote))
+                    .ok()?;
+                Some((name.to_string(), branch.get().target()?))
+            })
+            .or_else(|| base.clone());
+        let compare_names: Vec<String> = match &compare {
             Some((name, _)) => match name.split_once('/') {
                 Some((_, short)) if self.is_remote_branch(name) => {
                     vec![name.clone(), short.to_string()]
@@ -507,6 +543,18 @@ impl GitRepo {
                 self.remote_counterpart(&branch, &name)
             };
 
+            let (cmp_base, base_ahead, base_behind) = match (&compare, branch.get().target()) {
+                (Some((cmp_name, cmp_tip)), Some(tip))
+                    if !is_remote && !compare_names.iter().any(|n| n == &name) =>
+                {
+                    match self.repo.graph_ahead_behind(tip, *cmp_tip) {
+                        Ok((a, b)) => (Some(cmp_name.clone()), a, b),
+                        Err(_) => (None, 0, 0),
+                    }
+                }
+                _ => (None, 0, 0),
+            };
+
             result.push(BranchInfo {
                 name,
                 is_head,
@@ -516,6 +564,9 @@ impl GitRepo {
                 remote_counterpart,
                 ahead,
                 behind,
+                base: cmp_base,
+                base_ahead,
+                base_behind,
             });
         }
 
@@ -1875,6 +1926,51 @@ mod tests {
         assert!(merged.merged);
         let base_stat = report.branches.iter().find(|b| b.name == base).unwrap();
         assert!(!base_stat.merged);
+    }
+
+    #[test]
+    fn branches_count_ahead_behind_against_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        repo.commit("init", "Ann", "ann@example.com").unwrap();
+        let base = repo.repo.head().unwrap().shorthand().unwrap().to_string();
+
+        repo.create_branch("develop", None).unwrap();
+        repo.create_branch("feature", None).unwrap();
+        repo.checkout_branch("feature").unwrap();
+        for f in ["b.txt", "c.txt"] {
+            write_file(dir.path(), f, f);
+            repo.stage(f).unwrap();
+            repo.commit(f, "Bob", "bob@example.com").unwrap();
+        }
+        repo.checkout_branch(&base).unwrap();
+        write_file(dir.path(), "m.txt", "m");
+        repo.stage("m.txt").unwrap();
+        repo.commit("main work", "Ann", "ann@example.com").unwrap();
+
+        let find = |list: &[BranchInfo], name: &str| {
+            list.iter().find(|b| b.name == name).cloned().unwrap()
+        };
+        let list = repo.branches().unwrap();
+        let feature = find(&list, "feature");
+        assert_eq!(feature.base.as_deref(), Some(base.as_str()));
+        assert_eq!((feature.base_ahead, feature.base_behind), (2, 1));
+        let main = find(&list, &base);
+        assert_eq!(main.base, None);
+
+        // Against "develop" instead: it has none of main's or feature's work.
+        let list = repo.branches_compared_with(Some("develop")).unwrap();
+        let feature = find(&list, "feature");
+        assert_eq!(feature.base.as_deref(), Some("develop"));
+        assert_eq!((feature.base_ahead, feature.base_behind), (2, 0));
+        assert_eq!(find(&list, "develop").base, None);
+        assert_eq!(find(&list, &base).base_ahead, 1);
+
+        // An unknown base falls back to the default branch.
+        let list = repo.branches_compared_with(Some("nope")).unwrap();
+        assert_eq!(find(&list, "feature").base.as_deref(), Some(base.as_str()));
     }
 
     #[test]

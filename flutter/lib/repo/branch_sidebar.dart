@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/app_locale.dart';
 import '../theme/app_theme.dart';
+import 'branch_base_prefs.dart';
 import 'file_explorer.dart';
 import 'git_actions.dart';
 import 'models.dart';
@@ -148,6 +149,9 @@ class _BranchSidebarState extends State<BranchSidebar> {
   static const _sortKeyPrefix = 'branchi_branch_sort_';
   BranchSort _sort = BranchSort.name;
 
+  /// The chosen base branch for this repo, or null for the default.
+  String? _compareBase;
+
   bool _localExpanded = true;
   bool _remoteExpanded = true;
   bool _isSearching = false;
@@ -171,8 +175,10 @@ class _BranchSidebarState extends State<BranchSidebar> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString(_sortKeyPrefix + repo);
+      final base = await BranchBasePrefs.load(repo);
       if (!mounted || repo != widget.repoPath) return;
       setState(() {
+        _compareBase = base;
         _sort = BranchSort.values.firstWhere(
           (v) => v.name == saved,
           orElse: () => BranchSort.name,
@@ -442,6 +448,15 @@ class _BranchSidebarState extends State<BranchSidebar> {
           checked: _sort == BranchSort.lastCommit,
           child: Text(translate('branch_sort_last_commit')),
         ),
+        PopupMenuItem(
+          value: 'compare_base',
+          child: Text(
+            translate('branch_compare_with').replaceAll(
+              '{base}',
+              _baseLabel(_currentBase) ?? _baseLabel(_compareBase) ?? 'main',
+            ),
+          ),
+        ),
         const PopupMenuDivider(),
         PopupMenuItem(
           value: 'watch',
@@ -471,6 +486,9 @@ class _BranchSidebarState extends State<BranchSidebar> {
       case 'sort_last_commit':
         await _setSort(BranchSort.lastCommit);
         break;
+      case 'compare_base':
+        await _chooseCompareBase();
+        break;
       case 'watch':
         await _selectWatchInterval(position);
         break;
@@ -486,10 +504,106 @@ class _BranchSidebarState extends State<BranchSidebar> {
     }
   }
 
+  /// Remote names ("origin") seen in the branch list.
+  Set<String> get _remoteNames => {
+        for (final branch in widget.branches)
+          if (branch.isRemote && branch.name.contains('/'))
+            branch.name.substring(0, branch.name.indexOf('/')),
+      };
+
+  /// The branch local branches are compared with, as shown ("main" for
+  /// "origin/main"), or null when nothing is compared.
+  String? _baseLabel(String? base) =>
+      base == null ? null : BranchBasePrefs.displayName(base, _remoteNames);
+
+  /// Lets the user pick which branch local branches are compared with.
+  Future<void> _chooseCompareBase() async {
+    final current = await BranchBasePrefs.load(widget.repoPath);
+    if (!mounted) return;
+    final names = [
+      ...sortBranches(
+        widget.branches.where((e) => !e.isRemote).toList(),
+        BranchSort.name,
+      ).map((e) => e.name),
+      ...sortBranches(
+        widget.branches
+            .where((e) => e.isRemote && !e.name.endsWith('/HEAD'))
+            .toList(),
+        BranchSort.name,
+      ).map((e) => e.name),
+    ];
+    const reset = '\u0000default';
+    final selected = current ?? reset;
+    final b = context.branchi;
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        Widget option(String value, Widget title, {String? subtitle}) =>
+            ListTile(
+              dense: true,
+              leading: Icon(
+                Icons.check,
+                size: 16,
+                color: value == selected ? b.accent : Colors.transparent,
+              ),
+              title: title,
+              subtitle: subtitle == null ? null : Text(subtitle),
+              onTap: () => Navigator.of(context).pop(value),
+            );
+        return SimpleDialog(
+          title: Text(translate('branch_compare_title')),
+          children: [
+            SizedBox(
+              width: 340,
+              height: 360,
+              child: ListView(
+                children: [
+                  option(
+                    reset,
+                    Text(translate('branch_compare_default')),
+                    subtitle: _defaultBaseLabel,
+                  ),
+                  for (final name in names)
+                    option(name, Text(name, style: TextStyle(color: b.fg))),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+    if (picked == null || !mounted) return;
+    final value = picked == reset ? null : picked;
+    if (value == current) return;
+    await BranchBasePrefs.save(widget.repoPath, value);
+    setState(() => _compareBase = value);
+    widget.onChanged();
+  }
+
+  /// What the default base is called, when the loaded branches are
+  /// compared with it.
+  String? get _defaultBaseLabel {
+    if (_compareBase == null) return _baseLabel(_currentBase);
+    return null;
+  }
+
+  /// The base the loaded branches were compared with.
+  String? get _currentBase {
+    for (final branch in widget.branches) {
+      if (branch.base != null) return branch.base;
+    }
+    return null;
+  }
+
   Widget _buildBranchRow(BranchEntry branch, {String? label}) {
     return _BranchTile(
       branch: branch,
       label: label ?? branch.name,
+      baseLabel: _baseLabel(branch.base),
+      isBase: !branch.isRemote &&
+          _currentBase != null &&
+          (branch.name == _currentBase ||
+              branch.name == _baseLabel(_currentBase)),
       onDoubleTap: () => _checkout(branch),
       onSecondaryTapDown: (position) => _showContextMenu(position, branch),
     );
@@ -818,19 +932,72 @@ class _BranchTile extends StatelessWidget {
   const _BranchTile({
     required this.branch,
     required this.label,
+    this.baseLabel,
+    this.isBase = false,
     required this.onDoubleTap,
     required this.onSecondaryTapDown,
   });
 
   final BranchEntry branch;
   final String label;
+
+  /// The base branch's name for the "3 ahead · 12 behind main" line; no
+  /// line when null.
+  final String? baseLabel;
+
+  /// Whether this is the branch the others are compared with.
+  final bool isBase;
   final VoidCallback onDoubleTap;
   final ValueChanged<Offset> onSecondaryTapDown;
+
+  /// From this many commits behind, the base line turns amber.
+  static const _farBehind = 100;
+
+  Widget _vsBase(BuildContext context, String base) {
+    final b = context.branchi;
+    String fill(String key) => translate(key)
+        .replaceAll('{ahead}', '${branch.baseAhead}')
+        .replaceAll('{behind}', '${branch.baseBehind}')
+        .replaceAll('{base}', base)
+        .replaceAll('{branch}', branch.name);
+    return Tooltip(
+      message: fill('branch_vs_base_tip'),
+      waitDuration: const Duration(milliseconds: 400),
+      child: Text(
+        fill(branch.baseBehind == 0 ? 'branch_vs_base_even' : 'branch_vs_base'),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: b.mono(
+          fontSize: 11,
+          color: branch.baseBehind >= _farBehind ? b.mod : b.muted,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final b = context.branchi;
     final current = branch.isHead;
+    final base = branch.isRemote ? null : baseLabel;
+    final name = Text.rich(
+      TextSpan(children: [
+        // Remote rows always say where they live.
+        if (branch.isRemote && label != branch.name)
+          TextSpan(
+            text: branch.name.substring(0, branch.name.length - label.length),
+            style: TextStyle(color: b.off),
+          ),
+        TextSpan(text: label),
+      ]),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: 13,
+        color: branch.isMerged ? b.mod : (current ? b.fg : b.muted),
+        fontWeight: current ? FontWeight.w500 : FontWeight.w400,
+      ),
+    );
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: Tooltip(
@@ -851,49 +1018,74 @@ class _BranchTile extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (!branch.isRemote) ...[
-                      Icon(
-                        Icons.call_split,
-                        size: 13,
-                        color: current ? b.accent : b.muted,
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Icon(
+                          Icons.call_split,
+                          size: 13,
+                          color: current ? b.accent : b.muted,
+                        ),
                       ),
                       const SizedBox(width: 8),
                     ],
                     Expanded(
-                      child: Text.rich(
-                        TextSpan(children: [
-                          // Remote rows always say where they live.
-                          if (branch.isRemote && label != branch.name)
-                            TextSpan(
-                              text: branch.name
-                                  .substring(0, branch.name.length - label.length),
-                              style: TextStyle(color: b.off),
-                            ),
-                          TextSpan(text: label),
-                        ]),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: branch.isMerged
-                              ? b.mod
-                              : (current ? b.fg : b.muted),
-                          fontWeight:
-                              current ? FontWeight.w500 : FontWeight.w400,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(child: name),
+                              if (isBase) ...[
+                                const SizedBox(width: 6),
+                                _BaseBadge(),
+                              ],
+                              if (branch.isMerged) ...[
+                                const SizedBox(width: 6),
+                                _MergedBadge(branch: branch),
+                              ],
+                              if (!branch.isRemote)
+                                _SyncState(branch: branch),
+                            ],
+                          ),
+                          // Full row width, under the name and the icons.
+                          if (base != null) ...[
+                            const SizedBox(height: 2),
+                            _vsBase(context, base),
+                          ],
+                        ],
                       ),
                     ),
-                    if (branch.isMerged) ...[
-                      const SizedBox(width: 6),
-                      _MergedBadge(branch: branch),
-                    ],
-                    if (!branch.isRemote) _SyncState(branch: branch),
                   ],
                 ),
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The "base" pill on the branch the others are compared with.
+class _BaseBadge extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    return Tooltip(
+      message: translate('branch_base_badge_tip'),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        decoration: BoxDecoration(
+          border: Border.all(color: b.line),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          translate('branch_base_badge'),
+          style: TextStyle(fontSize: 10, color: b.muted),
         ),
       ),
     );

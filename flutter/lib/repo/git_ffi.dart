@@ -100,8 +100,14 @@ typedef _CommitStatsDart = Pointer<Utf8> Function(
 typedef _BranchReportNative = Pointer<Utf8> Function(Pointer<Utf8> path);
 typedef _BranchReportDart = Pointer<Utf8> Function(Pointer<Utf8> path);
 
-typedef _BranchesNative = Pointer<Utf8> Function(Pointer<Utf8> path);
-typedef _BranchesDart = Pointer<Utf8> Function(Pointer<Utf8> path);
+typedef _BranchesNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> compareBase,
+);
+typedef _BranchesDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> compareBase,
+);
 
 typedef _CommitDiffNative = Pointer<Utf8> Function(
   Pointer<Utf8> path,
@@ -307,7 +313,7 @@ class GitFfi {
           'branchi_branch_report',
         ),
         _branches = lib.lookupFunction<_BranchesNative, _BranchesDart>(
-          'branchi_branches',
+          'branchi_branches_compared_with',
         ),
         _commitDiff =
             lib.lookupFunction<_CommitDiffNative, _CommitDiffDart>(
@@ -620,13 +626,16 @@ class GitFfi {
   }
 
   /// Local and remote-tracking branches, as raw decoded JSON list entries.
-  /// Throws a [GitFfiException] on failure.
-  List<dynamic> branches(String path) {
+  /// Local branches are counted ahead/behind against [compareBase], or the
+  /// default branch when it's null. Throws a [GitFfiException] on failure.
+  List<dynamic> branches(String path, {String? compareBase}) {
     final pathPtr = path.toNativeUtf8();
+    final basePtr = compareBase?.toNativeUtf8() ?? nullptr;
     try {
-      return _consumeJsonList(_branches(pathPtr));
+      return _consumeJsonList(_branches(pathPtr, basePtr));
     } finally {
       malloc.free(pathPtr);
+      if (basePtr != nullptr) malloc.free(basePtr);
     }
   }
 
