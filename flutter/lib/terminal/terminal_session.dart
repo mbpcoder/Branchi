@@ -41,6 +41,18 @@ String defaultShell() {
 /// user's profile.
 List<String> _shellArguments() => Platform.isMacOS ? const ['-l'] : const [];
 
+/// flutter_pty builds the Windows command line by joining the executable and
+/// arguments with spaces, without quoting. A path like
+/// `C:\Program Files\PowerShell\7\pwsh.exe` then reaches the shell split
+/// at the space (pwsh tries to run `C:\Program` as a script), so quote any
+/// part that contains whitespace.
+String _quoteForWindows(String value) {
+  if (!Platform.isWindows) return value;
+  if (value.startsWith('"') && value.endsWith('"')) return value;
+  if (!value.contains(RegExp(r'\s'))) return value;
+  return '"$value"';
+}
+
 /// Spawns a real shell in a pseudo-terminal and wires it up to an in-app
 /// [Terminal], so the terminal panel runs inside the app itself rather than
 /// opening a separate OS terminal window (which isn't available in headless
@@ -52,8 +64,8 @@ TerminalSession spawnTerminalSession(
   String? shellExecutable,
 }) {
   final pty = Pty.start(
-    shellExecutable ?? defaultShell(),
-    arguments: _shellArguments(),
+    _quoteForWindows(shellExecutable ?? defaultShell()),
+    arguments: [for (final arg in _shellArguments()) _quoteForWindows(arg)],
     columns: 80,
     rows: 24,
     workingDirectory: workingDirectory ?? Directory.current.path,
