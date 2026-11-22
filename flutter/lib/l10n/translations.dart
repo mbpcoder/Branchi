@@ -37,6 +37,9 @@ const Map<String, Map<String, String>> translations = {
     'switch_to_light_mode': 'Switch to light mode',
     'language': 'Language',
     'close': 'Close',
+    'branch_merged_title': 'Already merged',
+    'branch_merged_info':
+        '"{branch}" is already merged into "{base}": all of its commits are in it. It is shown in a different color so you can spot branches you may be able to delete.\n\nNote: branches merged with squash or rebase can\'t be detected, so they are not marked.\n\nBranchi is still under development. Check the branch yourself before doing anything you can\'t undo, such as deleting it.',
     'terminal': 'Terminal',
     'logs': 'Logs',
     'no_logged_actions': 'No git actions have run yet.',
@@ -335,6 +338,9 @@ const Map<String, Map<String, String>> translations = {
     'switch_to_light_mode': 'التبديل إلى الوضع الفاتح',
     'language': 'اللغة',
     'close': 'إغلاق',
+    'branch_merged_title': 'مدمج مسبقًا',
+    'branch_merged_info':
+        'الفرع "{branch}" مدمج مسبقًا في "{base}": كل إيداعاته موجودة فيه. يظهر بلون مختلف لتتعرف على الفروع التي قد يمكن حذفها.\n\nملاحظة: لا يمكن اكتشاف الفروع المدمجة بطريقة squash أو rebase، لذلك لا يتم تمييزها.\n\nلا يزال Branchi قيد التطوير. تحقّق من الفرع بنفسك قبل القيام بأي إجراء لا يمكن التراجع عنه، مثل حذفه.',
     'terminal': 'الطرفية',
     'logs': 'السجلات',
     'no_logged_actions': 'لم يتم تنفيذ أي إجراءات git بعد.',
@@ -632,6 +638,9 @@ const Map<String, Map<String, String>> translations = {
     'switch_to_light_mode': 'تغییر به حالت روشن',
     'language': 'زبان',
     'close': 'بستن',
+    'branch_merged_title': 'قبلاً ادغام شده',
+    'branch_merged_info':
+        'شاخهٔ «{branch}» قبلاً در «{base}» ادغام شده است: همهٔ کامیت‌هایش در آن هست. با رنگ متفاوت نشان داده می‌شود تا شاخه‌هایی را که احتمالاً می‌توان حذف کرد پیدا کنید.\n\nتوجه: شاخه‌هایی که با squash یا rebase ادغام شده‌اند قابل تشخیص نیستند و علامت نمی‌خورند.\n\nBranchi هنوز در حال توسعه است. پیش از هر کار برگشت‌ناپذیر، مثل حذف شاخه، خودتان آن را بررسی کنید.',
     'terminal': 'ترمینال',
     'logs': 'گزارش‌ها',
     'no_logged_actions': 'هنوز هیچ عملیات gitای اجرا نشده است.',

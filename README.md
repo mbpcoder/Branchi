@@ -307,6 +307,29 @@ branchi/
     └── lib/             # screens, report, terminal, settings, …
 ```
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/),
+certificate by [SignPath Foundation](https://signpath.org/).
+
+Windows releases (`branchi.exe` and `branchi-setup.exe`) are built and
+signed automatically by the [release workflow](.github/workflows/release.yml)
+from this repository's source. Only binaries built from this project are
+signed; third-party libraries bundled with the app are not.
+
+**Team roles**
+
+- Committers and reviewers: [repository members](https://github.com/mbpcoder/Branchi/graphs/contributors)
+- Approvers (each signing request): [repository owner](https://github.com/mbpcoder)
+
+**Privacy policy**
+
+Branchi does not send any information to other networked systems unless
+the user asks for it, with one exception: it checks GitHub
+(`api.github.com`) for a newer Branchi release. This check can be turned off
+in Settings → Updates. Git operations (fetch, pull, push, clone) contact
+only the remotes configured in the user's repositories.
+
 ## License
 
 Branchi is released under the [MIT License](LICENSE).

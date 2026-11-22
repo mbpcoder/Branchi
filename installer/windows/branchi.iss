@@ -16,6 +16,12 @@ AppId={{6F3C2A1E-8B4D-4E7A-9C21-5B0D7E3F4A12}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppName}
+; Version info on branchi-setup.exe; SignPath checks the product name and
+; version when signing (see .signpath/artifact-configurations/installer.xml).
+VersionInfoProductName={#AppName}
+VersionInfoProductVersion={#AppVersion}
+VersionInfoProductTextVersion={#AppVersion}
+VersionInfoVersion={#AppVersion}
 DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
