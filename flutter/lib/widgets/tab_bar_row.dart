@@ -4,8 +4,9 @@ import '../l10n/app_locale.dart';
 import '../models/repo_tab.dart';
 import '../theme/app_theme.dart';
 
-/// Slim strip of open tabs, always shown under the top bar, with an
-/// "add tab" button right after the last tab. Middle-click a tab to close it.
+/// Strip of open tabs with an "add tab" button right after the last tab.
+/// Middle-click a tab to close it. With [embedded] it draws no bar of its
+/// own, for placing inside the top bar's first row.
 class TabBarRow extends StatelessWidget {
   const TabBarRow({
     super.key,
@@ -14,6 +15,7 @@ class TabBarRow extends StatelessWidget {
     required this.onSelect,
     required this.onClose,
     required this.onAddTab,
+    this.embedded = false,
   });
 
   static const double height = 34;
@@ -23,19 +25,15 @@ class TabBarRow extends StatelessWidget {
   final ValueChanged<int> onSelect;
   final ValueChanged<int> onClose;
   final VoidCallback onAddTab;
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
     final b = context.branchi;
-    return Container(
+    // The "add tab" button is the list's last item, so it sits right
+    // after the last open tab and scrolls with the tabs.
+    final list = SizedBox(
       height: height,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      decoration: BoxDecoration(
-        color: b.bg,
-        border: Border(bottom: BorderSide(color: b.line)),
-      ),
-      // The "add tab" button is the list's last item, so it sits right
-      // after the last open tab and scrolls with the tabs.
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: tabs.length + 1,
@@ -62,6 +60,16 @@ class TabBarRow extends StatelessWidget {
           );
         },
       ),
+    );
+    if (embedded) return list;
+    return Container(
+      height: height,
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: b.bg,
+        border: Border(bottom: BorderSide(color: b.line)),
+      ),
+      child: list,
     );
   }
 }
