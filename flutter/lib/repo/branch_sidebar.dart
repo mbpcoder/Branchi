@@ -871,7 +871,7 @@ class _SectionHeaderState extends State<_SectionHeader> {
   Widget build(BuildContext context) {
     final b = context.branchi;
     return Padding(
-      padding: const EdgeInsets.only(left: 8, bottom: 6),
+      padding: const EdgeInsetsDirectional.only(start: 8, bottom: 6),
       child: SizedBox(
         height: 22,
         child: Row(
@@ -919,7 +919,7 @@ class _SectionHeaderState extends State<_SectionHeader> {
             ),
             if (widget.count != null)
               Padding(
-                padding: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsetsDirectional.only(end: 8),
                 child: Text(
                   '${widget.count}',
                   style: TextStyle(fontSize: 11, color: b.muted),
@@ -1237,7 +1237,7 @@ class _SyncState extends StatelessWidget {
       return Tooltip(
         message: translate('branch_local_only'),
         child: Padding(
-          padding: const EdgeInsets.only(left: 6),
+          padding: const EdgeInsetsDirectional.only(start: 6),
           child: Icon(Icons.cloud_off_outlined, size: 13, color: b.off),
         ),
       );
@@ -1252,7 +1252,7 @@ class _SyncState extends StatelessWidget {
                 .replaceAll('{n}', '${branch.ahead}')
                 .replaceAll('{remote}', counterpart),
             child: Padding(
-              padding: const EdgeInsets.only(left: 6),
+              padding: const EdgeInsetsDirectional.only(start: 6),
               child: Text('↑${branch.ahead}', style: mono.copyWith(color: b.add)),
             ),
           ),
@@ -1262,7 +1262,7 @@ class _SyncState extends StatelessWidget {
                 .replaceAll('{n}', '${branch.behind}')
                 .replaceAll('{remote}', counterpart),
             child: Padding(
-              padding: const EdgeInsets.only(left: 6),
+              padding: const EdgeInsetsDirectional.only(start: 6),
               child:
                   Text('↓${branch.behind}', style: mono.copyWith(color: b.accent)),
             ),
@@ -1270,7 +1270,7 @@ class _SyncState extends StatelessWidget {
         Tooltip(
           message: translate('branch_on_remote').replaceAll('{remote}', counterpart),
           child: Padding(
-            padding: const EdgeInsets.only(left: 6),
+            padding: const EdgeInsetsDirectional.only(start: 6),
             child: Icon(Icons.cloud_outlined, size: 13, color: b.muted),
           ),
         ),

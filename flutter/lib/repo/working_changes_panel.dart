@@ -725,7 +725,7 @@ class _MergeBanner extends StatelessWidget {
         : state.message.split('\n').first;
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-      padding: const EdgeInsets.fromLTRB(12, 10, 4, 2),
+      padding: const EdgeInsetsDirectional.fromSTEB(12, 10, 4, 2),
       decoration: BoxDecoration(
         color: b.mod.withValues(alpha: 0.08),
         border: Border.all(color: b.mod.withValues(alpha: 0.35)),
@@ -844,7 +844,7 @@ class _ConflictRow extends StatelessWidget {
         onTap: onTap,
         onDoubleTap: onOpen,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 6, 12, 6),
+          padding: const EdgeInsetsDirectional.fromSTEB(20, 6, 12, 6),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -872,7 +872,7 @@ class _ConflictRow extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Padding(
-                padding: const EdgeInsets.only(left: 18),
+                padding: const EdgeInsetsDirectional.only(start: 18),
                 child: Wrap(
                   spacing: 6,
                   children: [
