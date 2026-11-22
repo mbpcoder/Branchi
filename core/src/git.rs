@@ -447,7 +447,11 @@ impl GitRepo {
             let is_base =
                 base_names.iter().any(|b| b == &name) || (is_remote && name.ends_with("/HEAD"));
             let merged_into = match (base_tip, branch.get().target()) {
-                (Some(base_tip), Some(tip)) if !is_base && self.is_merged(tip, base_tip) => {
+                (Some(base_tip), Some(tip))
+                    if !is_base
+                        && self.is_merged(tip, base_tip)
+                        && !(!is_remote && self.never_moved(&name)) =>
+                {
                     base.as_ref().map(|(name, _)| name.clone())
                 }
                 _ => None,
@@ -492,10 +496,28 @@ impl GitRepo {
             .is_ok()
     }
 
-    /// Whether every commit of `tip` is already in `base_tip`.
+    /// Whether a local branch still points where it was created (its reflog
+    /// holds only the "branch: Created from ..." entry), i.e. nothing was
+    /// ever committed or pulled on it.
+    fn never_moved(&self, name: &str) -> bool {
+        match self.repo.reflog(&format!("refs/heads/{name}")) {
+            Ok(log) => {
+                log.len() == 1
+                    && log
+                        .get(0)
+                        .and_then(|e| e.message().map(|m| m.starts_with("branch: Created")))
+                        .unwrap_or(false)
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Whether every commit of `tip` is already in `base_tip`. A branch that
+    /// points at the same commit as the base (e.g. a new branch with no
+    /// commits yet) doesn't count as merged.
     fn is_merged(&self, tip: git2::Oid, base_tip: git2::Oid) -> bool {
-        tip == base_tip
-            || self
+        tip != base_tip
+            && self
                 .repo
                 .graph_descendant_of(base_tip, tip)
                 .unwrap_or(false)
@@ -1617,7 +1639,31 @@ mod tests {
         let base = repo.repo.head().unwrap().shorthand().unwrap().to_string();
         assert!(base == "main" || base == "master");
 
+        // "fresh" has no commits of its own yet: not marked as merged.
+        repo.create_branch("fresh", None).unwrap();
+
+        // "done" gets a commit that the base then takes in, and the base
+        // moves on.
         repo.create_branch("done", None).unwrap();
+        repo.checkout_branch("done").unwrap();
+        write_file(dir.path(), "d.txt", "d");
+        repo.stage("d.txt").unwrap();
+        repo.commit("done work", "Bob", "bob@example.com").unwrap();
+        let done_tip = repo.repo.head().unwrap().target().unwrap();
+        repo.checkout_branch(&base).unwrap();
+        repo.repo
+            .find_reference(&format!("refs/heads/{base}"))
+            .unwrap()
+            .set_target(done_tip, "test")
+            .unwrap();
+        repo.repo
+            .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        write_file(dir.path(), "c.txt", "c");
+        repo.stage("c.txt").unwrap();
+        repo.commit("more base work", "Ann", "ann@example.com")
+            .unwrap();
+
         repo.create_branch("feature", None).unwrap();
         repo.checkout_branch("feature").unwrap();
         write_file(dir.path(), "b.txt", "b");
@@ -1635,6 +1681,7 @@ mod tests {
                 .clone()
         };
         assert_eq!(merged_into("done"), Some(base.clone()));
+        assert_eq!(merged_into("fresh"), None);
         assert_eq!(merged_into("feature"), None);
         assert_eq!(merged_into(&base), None);
     }
@@ -1656,9 +1703,17 @@ mod tests {
         repo.stage("b.txt").unwrap();
         repo.commit("shipped work", "Bob", "bob@example.com")
             .unwrap();
-        let shipped_tip = repo.repo.head().unwrap().target().unwrap();
+        // The remote's default branch has the shipped work plus more.
+        repo.create_branch("tmp", None).unwrap();
+        repo.checkout_branch("tmp").unwrap();
+        write_file(dir.path(), "c.txt", "c");
+        repo.stage("c.txt").unwrap();
+        repo.commit("more work", "Ann", "ann@example.com").unwrap();
+        let develop_tip = repo.repo.head().unwrap().target().unwrap();
+        repo.checkout_branch("shipped").unwrap();
+        repo.delete_branch("tmp", false).unwrap();
         repo.repo
-            .reference("refs/remotes/origin/develop", shipped_tip, true, "test")
+            .reference("refs/remotes/origin/develop", develop_tip, true, "test")
             .unwrap();
         repo.repo
             .reference_symbolic(
