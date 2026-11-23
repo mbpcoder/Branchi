@@ -712,19 +712,24 @@ impl GitRepo {
         Ok(())
     }
 
-    /// Creates a new local branch named `name`. If `from` is `Some`, it must
-    /// name an existing remote-tracking branch (e.g. `origin/feature`); the
-    /// new branch starts at that branch's commit and tracks it. Otherwise
-    /// the new branch starts at HEAD. Does not check out the new branch.
+    /// Creates a new local branch named `name`. If `from` is `Some`, it
+    /// names the branch to start from: a remote-tracking branch (e.g.
+    /// `origin/feature`), which the new branch then tracks, or a local
+    /// branch (e.g. `develop`), which it doesn't. Otherwise the new branch
+    /// starts at HEAD. Never overwrites an existing branch. Does not check
+    /// out the new branch.
     pub fn create_branch(&self, name: &str, from: Option<&str>) -> Result<()> {
         let (target, upstream) = match from {
-            Some(remote_branch) => {
-                let branch = self
-                    .repo
-                    .find_branch(remote_branch, git2::BranchType::Remote)
-                    .with_context(|| format!("remote branch not found: {remote_branch}"))?;
-                let commit = branch.get().peel_to_commit()?;
-                (commit, Some(remote_branch.to_string()))
+            Some(start) => {
+                if let Ok(remote) = self.repo.find_branch(start, git2::BranchType::Remote) {
+                    (remote.get().peel_to_commit()?, Some(start.to_string()))
+                } else {
+                    let local = self
+                        .repo
+                        .find_branch(start, git2::BranchType::Local)
+                        .with_context(|| format!("branch not found: {start}"))?;
+                    (local.get().peel_to_commit()?, None)
+                }
             }
             None => {
                 let commit = self.repo.head()?.peel_to_commit()?;
@@ -1781,6 +1786,108 @@ mod tests {
 
         let branches = repo.branches().unwrap();
         assert!(!branches.iter().any(|b| b.name == "feature"));
+    }
+
+    #[test]
+    fn create_branch_from_local_branch_starts_at_its_tip_without_tracking() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        repo.commit("init", "Test User", "test@example.com").unwrap();
+        let head = repo.repo.head().unwrap().name().unwrap().to_string();
+        let main = head.trim_start_matches("refs/heads/").to_string();
+
+        // "develop" moves ahead of the current branch.
+        repo.create_branch("develop", None).unwrap();
+        repo.checkout_branch("develop").unwrap();
+        write_file(dir.path(), "b.txt", "two");
+        repo.stage("b.txt").unwrap();
+        repo.commit("on develop", "Test User", "test@example.com").unwrap();
+        let develop_tip = repo.repo.head().unwrap().target().unwrap();
+        repo.checkout_branch(&main).unwrap();
+
+        repo.create_branch("feature/x", Some("develop")).unwrap();
+        let created = repo
+            .repo
+            .find_branch("feature/x", git2::BranchType::Local)
+            .unwrap();
+        assert_eq!(created.get().target().unwrap(), develop_tip);
+        assert!(created.upstream().is_err(), "a local start point isn't tracked");
+        // Still on the original branch, with its files untouched.
+        assert_eq!(repo.repo.head().unwrap().name().unwrap(), head);
+        assert!(!dir.path().join("b.txt").exists());
+    }
+
+    #[test]
+    fn create_branch_refuses_to_overwrite_and_unknown_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        repo.commit("init", "Test User", "test@example.com").unwrap();
+
+        repo.create_branch("feature", None).unwrap();
+        let before = repo
+            .repo
+            .find_branch("feature", git2::BranchType::Local)
+            .unwrap()
+            .get()
+            .target();
+        write_file(dir.path(), "b.txt", "two");
+        repo.stage("b.txt").unwrap();
+        repo.commit("second", "Test User", "test@example.com").unwrap();
+
+        assert!(repo.create_branch("feature", None).is_err());
+        let after = repo
+            .repo
+            .find_branch("feature", git2::BranchType::Local)
+            .unwrap()
+            .get()
+            .target();
+        assert_eq!(before, after, "an existing branch must not move");
+        assert!(repo.create_branch("other", Some("no-such-branch")).is_err());
+    }
+
+    #[test]
+    fn checkout_keeps_uncommitted_changes_that_would_be_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        repo.commit("init", "Test User", "test@example.com").unwrap();
+        let main = repo.repo.head().unwrap().name().unwrap().to_string();
+
+        repo.create_branch("other", None).unwrap();
+        repo.checkout_branch("other").unwrap();
+        write_file(dir.path(), "a.txt", "changed on other");
+        repo.stage("a.txt").unwrap();
+        repo.commit("edit a", "Test User", "test@example.com").unwrap();
+        repo.checkout_branch(main.trim_start_matches("refs/heads/")).unwrap();
+
+        // An uncommitted edit to a file the other branch changes.
+        write_file(dir.path(), "a.txt", "my unsaved work");
+        assert!(repo.checkout_branch("other").is_err());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "my unsaved work"
+        );
+        assert_eq!(repo.repo.head().unwrap().name().unwrap(), main);
+    }
+
+    #[test]
+    fn delete_refuses_the_checked_out_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        repo.commit("init", "Test User", "test@example.com").unwrap();
+        let head = repo.repo.head().unwrap().name().unwrap().to_string();
+
+        assert!(repo
+            .delete_branch(head.trim_start_matches("refs/heads/"), false)
+            .is_err());
+        assert!(repo.repo.find_reference(&head).is_ok());
     }
 
     #[test]

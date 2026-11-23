@@ -197,8 +197,9 @@ class GitActions {
         : GitActionResult.failure(error);
   }
 
-  /// Creates local branch [name], tracking remote branch [from] (e.g.
-  /// `origin/feature`) if given, or starting from HEAD otherwise.
+  /// Creates local branch [name] starting at [from]: a remote branch (e.g.
+  /// `origin/feature`, which it then tracks) or a local one; at HEAD when
+  /// [from] is null.
   static Future<GitActionResult> createBranch(
     String path,
     String name, {
