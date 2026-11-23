@@ -964,16 +964,27 @@ impl GitRepo {
             );
         }
 
+        if self.repo.head()?.name() == Some(branch_refname.as_str()) {
+            // Bring the working tree along first, *safely*: only files that
+            // changed upstream are touched, uncommitted work elsewhere
+            // (staged or not) is kept, and if an upstream change would
+            // overwrite a local edit the checkout fails, before the branch
+            // has moved, so nothing changes at all. (A forced checkout here
+            // used to throw local changes away.)
+            let obj = self.repo.find_object(upstream_commit.id(), None)?;
+            self.repo
+                .checkout_tree(&obj, Some(git2::build::CheckoutBuilder::new().safe()))
+                .with_context(|| {
+                    format!(
+                        "can't update '{name}': incoming changes would overwrite your \
+                         uncommitted changes. Commit or discard them first."
+                    )
+                })?;
+        }
+
         branch
             .get_mut()
             .set_target(upstream_commit.id(), "branchi: fast-forward update")?;
-
-        if self.repo.head()?.name() == Some(branch_refname.as_str()) {
-            let obj = self.repo.find_object(upstream_commit.id(), None)?;
-            self.repo
-                .checkout_tree(&obj, Some(git2::build::CheckoutBuilder::new().force()))?;
-            self.repo.set_head(&branch_refname)?;
-        }
 
         Ok(())
     }
@@ -2528,6 +2539,73 @@ mod tests {
         let log = local_repo.log(10).unwrap();
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].summary, "second");
+    }
+
+    /// A clone whose upstream has one new commit (changing `a.txt` and
+    /// adding `new.txt`); returns (remote, clone) with their dirs.
+    fn clone_behind_upstream() -> (tempfile::TempDir, GitRepo, tempfile::TempDir, GitRepo) {
+        let remote_dir = tempfile::tempdir().unwrap();
+        let remote = GitRepo::init(remote_dir.path()).unwrap();
+        write_file(remote_dir.path(), "a.txt", "one\n");
+        write_file(remote_dir.path(), "b.txt", "bee\n");
+        remote.stage("a.txt").unwrap();
+        remote.stage("b.txt").unwrap();
+        remote.commit("init", "Test User", "test@example.com").unwrap();
+        let local_dir = tempfile::tempdir().unwrap();
+        let local = GitRepo::clone(remote_dir.path().to_str().unwrap(), local_dir.path()).unwrap();
+        write_file(remote_dir.path(), "a.txt", "one\ntwo\n");
+        write_file(remote_dir.path(), "new.txt", "new\n");
+        remote.stage("a.txt").unwrap();
+        remote.stage("new.txt").unwrap();
+        remote.commit("upstream", "Test User", "test@example.com").unwrap();
+        (remote_dir, remote, local_dir, local)
+    }
+
+    fn current_branch(repo: &GitRepo) -> String {
+        repo.repo.head().unwrap().shorthand().unwrap().to_string()
+    }
+
+    #[test]
+    fn update_keeps_uncommitted_changes_to_other_files() {
+        let (_rd, remote, local_dir, local) = clone_behind_upstream();
+        let dir = local_dir.path();
+        // Unstaged edit, staged new file, untracked file.
+        write_file(dir, "b.txt", "my edit\n");
+        write_file(dir, "notes.md", "staged\n");
+        local.stage("notes.md").unwrap();
+        write_file(dir, "scratch.txt", "untracked\n");
+
+        local.update_branch(&current_branch(&local)).unwrap();
+
+        let read = |f: &str| std::fs::read_to_string(dir.join(f)).unwrap();
+        assert_eq!(read("a.txt"), "one\ntwo\n", "upstream change applied");
+        assert_eq!(read("new.txt"), "new\n");
+        assert_eq!(read("b.txt"), "my edit\n", "unstaged edit kept");
+        assert_eq!(read("notes.md"), "staged\n", "staged file kept");
+        assert_eq!(read("scratch.txt"), "untracked\n", "untracked file kept");
+        let index = local.repo.index().unwrap();
+        assert!(index.get_path(Path::new("notes.md"), 0).is_some(), "still staged");
+        assert_eq!(
+            local.repo.head().unwrap().target(),
+            remote.repo.head().unwrap().target()
+        );
+    }
+
+    #[test]
+    fn update_refuses_and_changes_nothing_when_it_would_overwrite_an_edit() {
+        let (_rd, _remote, local_dir, local) = clone_behind_upstream();
+        let dir = local_dir.path();
+        let before = local.repo.head().unwrap().target();
+        write_file(dir, "a.txt", "my conflicting edit\n");
+
+        assert!(local.update_branch(&current_branch(&local)).is_err());
+
+        assert_eq!(
+            std::fs::read_to_string(dir.join("a.txt")).unwrap(),
+            "my conflicting edit\n"
+        );
+        assert!(!dir.join("new.txt").exists());
+        assert_eq!(local.repo.head().unwrap().target(), before, "branch not moved");
     }
 
     #[test]
