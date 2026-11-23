@@ -165,8 +165,12 @@ class _TerminalPanelState extends State<TerminalPanel> {
                 height: 32,
                 child: Row(
                   children: [
-                    Expanded(
+                    // Tabs take only the room they need, so the + button
+                    // follows the last tab; they scroll once they fill
+                    // the row.
+                    Flexible(
                       child: ListView.builder(
+                        shrinkWrap: true,
                         scrollDirection: Axis.horizontal,
                         itemCount: sessions.length,
                         itemBuilder: (context, index) {

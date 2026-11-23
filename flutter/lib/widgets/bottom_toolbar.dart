@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../l10n/app_locale.dart';
@@ -116,6 +117,9 @@ class BottomToolbar extends StatelessWidget {
             const SizedBox(width: 8),
             _FooterToggle(
               label: translate('terminal'),
+              tooltip: defaultTargetPlatform == TargetPlatform.macOS
+                  ? '⌥F12'
+                  : 'Alt+F12',
               selected: isTerminalOpen,
               onTap: onToggleTerminal,
             ),
@@ -131,16 +135,18 @@ class _FooterToggle extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.tooltip,
   });
 
   final String label;
+  final String? tooltip;
   final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final b = context.branchi;
-    return InkWell(
+    final toggle = InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(4),
       child: Container(
@@ -155,5 +161,6 @@ class _FooterToggle extends StatelessWidget {
         ),
       ),
     );
+    return tooltip == null ? toggle : Tooltip(message: tooltip!, child: toggle);
   }
 }

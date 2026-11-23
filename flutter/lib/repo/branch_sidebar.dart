@@ -160,6 +160,10 @@ class _BranchSidebarState extends State<BranchSidebar> {
 
   bool _localExpanded = true;
   bool _remoteExpanded = true;
+
+  /// Folder and remote nodes the user collapsed, keyed by
+  /// "local:feature", "remote:origin" or "remote:origin/feature".
+  final Set<String> _collapsed = {};
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
@@ -670,6 +674,48 @@ class _BranchSidebarState extends State<BranchSidebar> {
     return null;
   }
 
+  /// Folders stay open while searching, so every match is visible.
+  bool _isExpanded(String key) =>
+      _searchQuery.trim().isNotEmpty || !_collapsed.contains(key);
+
+  void _toggleFolder(String key) => setState(() {
+        if (!_collapsed.remove(key)) _collapsed.add(key);
+      });
+
+  /// Rows for [folder]: its sub-folders first, then its branches, each
+  /// indented by [depth]. [key] prefixes the folder keys in [_collapsed].
+  List<Widget> _treeRows(
+    _BranchFolder folder, {
+    required String key,
+    required int depth,
+  }) {
+    final names = folder.folders.keys.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return [
+      for (final name in names) ...[
+        _FolderRow(
+          name: name,
+          icon: Icons.folder_outlined,
+          depth: depth,
+          count: folder.folders[name]!.branchCount,
+          expanded: _isExpanded('$key$name'),
+          onToggle: () => _toggleFolder('$key$name'),
+        ),
+        if (_isExpanded('$key$name'))
+          ..._treeRows(
+            folder.folders[name]!,
+            key: '$key$name/',
+            depth: depth + 1,
+          ),
+      ],
+      for (final branch in folder.branches)
+        Padding(
+          padding: EdgeInsetsDirectional.only(start: depth * _treeIndent),
+          child: _buildBranchRow(branch, label: branch.name.split('/').last),
+        ),
+    ];
+  }
+
   Widget _buildBranchRow(BranchEntry branch, {String? label}) {
     return _BranchTile(
       branch: branch,
@@ -703,23 +749,16 @@ class _BranchSidebarState extends State<BranchSidebar> {
       _sort,
     );
 
-    // Remote branches that a local branch already stands for are shown on
-    // that local row (cloud + ahead/behind), so only the rest are listed,
-    // grouped by remote ("origin/main" -> "origin").
-    final represented = {
-      for (final branch in widget.branches)
-        if (!branch.isRemote && branch.remoteCounterpart != null)
-          branch.remoteCounterpart!,
-    };
+    // Every remote branch, grouped by remote ("origin/main" -> "origin").
     final remotesByName = <String, List<BranchEntry>>{};
     for (final branch in remote) {
-      if (represented.contains(branch.name) || branch.name.endsWith('/HEAD')) {
-        continue;
-      }
+      if (branch.name.endsWith('/HEAD')) continue;
       final slash = branch.name.indexOf('/');
       final remoteName = slash == -1 ? '' : branch.name.substring(0, slash);
       remotesByName.putIfAbsent(remoteName, () => []).add(branch);
     }
+    final remoteCount =
+        remotesByName.values.fold<int>(0, (sum, list) => sum + list.length);
 
     final watching = widget.watchIntervalMinutes != null;
 
@@ -817,35 +856,44 @@ class _BranchSidebarState extends State<BranchSidebar> {
               ),
             ),
           if (_localExpanded)
-            for (final branch in local) _buildBranchRow(branch),
+            ..._treeRows(
+              _BranchFolder.of(local, (branch) => branch.name),
+              key: 'local:',
+              depth: 0,
+            ),
           if (remotesByName.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 12, 8, 12),
               child: Divider(height: 1, thickness: 1, color: b.line),
             ),
-            for (final entry in remotesByName.entries) ...[
-              _SectionHeader(
-                title: translate('branches_only_on_remote')
-                    .replaceAll('{remote}', entry.key),
-                icon: Icons.cloud_outlined,
-                count: entry.value.length,
-                expanded: _remoteExpanded,
-                onToggle: () =>
-                    setState(() => _remoteExpanded = !_remoteExpanded),
-              ),
-              if (_remoteExpanded)
-                _RemoteOnlyBox(
-                  children: [
-                    for (final branch in entry.value)
-                      _buildBranchRow(
-                        branch,
-                        label: _shortRemoteName(branch.name),
-                      ),
-                  ],
+            _SectionHeader(
+              title: translate('branches_remote'),
+              icon: Icons.cloud_outlined,
+              count: remoteCount,
+              expanded: _remoteExpanded,
+              onToggle: () =>
+                  setState(() => _remoteExpanded = !_remoteExpanded),
+            ),
+            if (_remoteExpanded)
+              for (final entry in remotesByName.entries) ...[
+                _FolderRow(
+                  name: entry.key,
+                  icon: Icons.dns_outlined,
+                  depth: 0,
+                  count: entry.value.length,
+                  expanded: _isExpanded('remote:${entry.key}'),
+                  onToggle: () => _toggleFolder('remote:${entry.key}'),
                 ),
-              if (entry.key != remotesByName.keys.last)
-                const SizedBox(height: 16),
-            ],
+                if (_isExpanded('remote:${entry.key}'))
+                  ..._treeRows(
+                    _BranchFolder.of(
+                      entry.value,
+                      (branch) => _shortRemoteName(branch.name),
+                    ),
+                    key: 'remote:${entry.key}/',
+                    depth: 1,
+                  ),
+              ],
           ],
         ],
       ),
@@ -1061,16 +1109,8 @@ class _BranchTile extends StatelessWidget {
     final b = context.branchi;
     final current = branch.isHead;
     final base = branch.isRemote ? null : baseLabel;
-    final name = Text.rich(
-      TextSpan(children: [
-        // Remote rows always say where they live.
-        if (branch.isRemote && label != branch.name)
-          TextSpan(
-            text: branch.name.substring(0, branch.name.length - label.length),
-            style: TextStyle(color: b.off),
-          ),
-        TextSpan(text: label),
-      ]),
+    final name = Text(
+      label,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: TextStyle(
@@ -1289,63 +1329,102 @@ class _SyncState extends StatelessWidget {
   }
 }
 
-/// Dashed box around branches that exist only on a remote, so they can't
-/// be mistaken for local ones.
-class _RemoteOnlyBox extends StatelessWidget {
-  const _RemoteOnlyBox({required this.children});
+/// How far each tree level is indented.
+const double _treeIndent = 14;
 
-  final List<Widget> children;
+/// Branches grouped by their "/"-separated name parts: "feature/login"
+/// lands in folder "feature".
+class _BranchFolder {
+  final Map<String, _BranchFolder> folders = {};
+  final List<BranchEntry> branches = [];
+
+  /// Builds the tree from [branches] (kept in their order), placed by the
+  /// path [pathOf] gives each one.
+  static _BranchFolder of(
+    List<BranchEntry> branches,
+    String Function(BranchEntry) pathOf,
+  ) {
+    final root = _BranchFolder();
+    for (final branch in branches) {
+      final parts = pathOf(branch).split('/');
+      var node = root;
+      for (final part in parts.take(parts.length - 1)) {
+        if (part.isEmpty) continue;
+        node = node.folders.putIfAbsent(part, _BranchFolder.new);
+      }
+      node.branches.add(branch);
+    }
+    return root;
+  }
+
+  int get branchCount => folders.values
+      .fold(branches.length, (sum, folder) => sum + folder.branchCount);
+}
+
+/// A collapsible folder (or remote) row in the branch tree.
+class _FolderRow extends StatelessWidget {
+  const _FolderRow({
+    required this.name,
+    required this.icon,
+    required this.depth,
+    required this.count,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  final String name;
+  final IconData icon;
+  final int depth;
+  final int count;
+  final bool expanded;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
     final b = context.branchi;
-    return CustomPaint(
-      painter: _DashedBorderPainter(color: b.off),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(2, 6, 2, 6),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            ...children,
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 2, 8, 2),
-              child: Text(
-                translate('branches_remote_hint'),
-                style: TextStyle(fontSize: 11, color: b.muted),
-              ),
+    return Padding(
+      padding: EdgeInsetsDirectional.only(
+        start: depth * _treeIndent,
+        bottom: 2,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(6),
+        child: InkWell(
+          onTap: onToggle,
+          borderRadius: BorderRadius.circular(6),
+          hoverColor: b.hover,
+          splashFactory: NoSplash.splashFactory,
+          child: Padding(
+            padding: const EdgeInsetsDirectional.fromSTEB(2, 5, 8, 5),
+            child: Row(
+              children: [
+                Icon(
+                  expanded
+                      ? Icons.keyboard_arrow_down
+                      : (Directionality.of(context) == TextDirection.rtl
+                          ? Icons.keyboard_arrow_left
+                          : Icons.keyboard_arrow_right),
+                  size: 14,
+                  color: b.muted,
+                ),
+                const SizedBox(width: 2),
+                Icon(icon, size: 13, color: b.muted),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 13, color: b.muted),
+                  ),
+                ),
+                Text('$count', style: TextStyle(fontSize: 11, color: b.off)),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
-}
-
-class _DashedBorderPainter extends CustomPainter {
-  _DashedBorderPainter({required this.color});
-
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    final path = Path()
-      ..addRRect(
-        RRect.fromRectAndRadius(
-          Offset.zero & size,
-          const Radius.circular(8),
-        ).deflate(0.5),
-      );
-    for (final metric in path.computeMetrics()) {
-      for (var d = 0.0; d < metric.length; d += 7) {
-        canvas.drawPath(metric.extractPath(d, d + 4), paint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DashedBorderPainter old) => old.color != color;
 }

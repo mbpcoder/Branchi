@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 
@@ -40,7 +41,27 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_onKey);
     _restoreState();
+  }
+
+  /// Alt+F12 shows or hides the terminal. Handled before the focus system,
+  /// so it also works while the terminal itself has focus (it would
+  /// otherwise send the keys to the shell).
+  bool _onKey(KeyEvent event) {
+    final keyboard = HardwareKeyboard.instance;
+    if (event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.f12 ||
+        !keyboard.isAltPressed ||
+        keyboard.isControlPressed ||
+        keyboard.isShiftPressed ||
+        keyboard.isMetaPressed ||
+        !mounted ||
+        !(ModalRoute.of(context)?.isCurrent ?? true)) {
+      return false;
+    }
+    _toggleTerminal();
+    return true;
   }
 
   /// Reopens the tabs and each tab's terminal tabs that were open the last
@@ -197,6 +218,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKey);
     for (final tab in _tabs) {
       for (final session in tab.terminalSessions) {
         session.dispose();
