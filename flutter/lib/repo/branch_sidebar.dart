@@ -308,12 +308,15 @@ class _BranchSidebarState extends State<BranchSidebar> {
     }
   }
 
-  Future<String?> _promptCreateLocalBranch(String suggestedName) {
+  Future<String?> _promptCreateLocalBranch(
+    String suggestedName, {
+    String? title,
+  }) {
     final controller = TextEditingController(text: suggestedName);
     return showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text(translate('bs_no_local_title')),
+        title: Text(title ?? translate('bs_no_local_title')),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -404,6 +407,42 @@ class _BranchSidebarState extends State<BranchSidebar> {
     }
   }
 
+  /// Asks for a name, creates a branch at [branch]'s tip and switches to
+  /// it.
+  Future<void> _newBranchFrom(BranchEntry branch) async {
+    final name = await _promptCreateLocalBranch(
+      '',
+      title: translate('bs_new_branch_from_title')
+          .replaceAll('{branch}', branch.name),
+    );
+    if (name == null || !mounted) return;
+    final created =
+        await GitActions.createBranch(widget.repoPath, name, from: branch.name);
+    if (!mounted) return;
+    if (!created.isSuccess) {
+      widget.onChanged();
+      _showError(created.error!);
+      return;
+    }
+    final switched = await GitActions.checkoutBranch(widget.repoPath, name);
+    if (!mounted) return;
+    widget.onChanged();
+    if (!switched.isSuccess) _showError(switched.error!);
+  }
+
+  /// Switches to [branch], then merges [base] into it (after asking how).
+  Future<void> _mergeBaseInto(BranchEntry branch, String base) async {
+    final switched =
+        await GitActions.checkoutBranch(widget.repoPath, branch.name);
+    if (!mounted) return;
+    widget.onChanged();
+    if (!switched.isSuccess) {
+      _showError(switched.error!);
+      return;
+    }
+    await _merge(base);
+  }
+
   /// Merges [source] into the current branch after asking how.
   Future<void> _merge(
     String source, {
@@ -438,6 +477,19 @@ class _BranchSidebarState extends State<BranchSidebar> {
     ].firstOrNull;
     final canMergeIn = current != null && !branch.isHead;
     final base = branch.isHead && branch.baseBehind > 0 ? branch.base : null;
+    // "Merge master into feature/x": for a local branch other than the
+    // current one and the base itself. (The current branch has "Update
+    // from master" above when it's behind.)
+    final compareBase = _currentBase;
+    final mergeBaseInto = !branch.isRemote &&
+            !branch.isHead &&
+            compareBase != null &&
+            branch.name != compareBase &&
+            branch.name != _baseLabel(compareBase)
+        ? compareBase
+        : null;
+    final hasMergeItems =
+        canMergeIn || base != null || mergeBaseInto != null;
     final overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox;
     final action = await showMenu<String>(
@@ -449,7 +501,7 @@ class _BranchSidebarState extends State<BranchSidebar> {
       items: [
         PopupMenuItem(value: 'checkout', child: Text(translate('bs_checkout'))),
         PopupMenuItem(value: 'update', child: Text(translate('bs_update'))),
-        if (canMergeIn || base != null) const PopupMenuDivider(),
+        if (hasMergeItems) const PopupMenuDivider(),
         if (canMergeIn)
           PopupMenuItem(
             value: 'merge',
@@ -471,7 +523,20 @@ class _BranchSidebarState extends State<BranchSidebar> {
                 .replaceAll('{source}', _baseLabel(base) ?? base)
                 .replaceAll('{count}', '${branch.baseBehind}')),
           ),
-        if (canMergeIn || base != null) const PopupMenuDivider(),
+        if (mergeBaseInto != null)
+          PopupMenuItem(
+            value: 'merge_base_into',
+            child: Text(translate('merge_menu')
+                .replaceAll('{source}', _baseLabel(mergeBaseInto)!)
+                .replaceAll('{target}', branch.name)),
+          ),
+        if (hasMergeItems) const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'new_branch',
+          child: Text(translate('bs_new_branch_from')
+              .replaceAll('{branch}', branch.name)),
+        ),
+        const PopupMenuDivider(),
         if (!branch.isRemote)
           PopupMenuItem(value: 'push', child: Text(translate('bs_push'))),
         PopupMenuItem(value: 'delete', child: Text(translate('bs_delete'))),
@@ -496,6 +561,12 @@ class _BranchSidebarState extends State<BranchSidebar> {
         break;
       case 'merge_base':
         await _merge(base!);
+        break;
+      case 'merge_base_into':
+        await _mergeBaseInto(branch, mergeBaseInto!);
+        break;
+      case 'new_branch':
+        await _newBranchFrom(branch);
         break;
       case 'delete':
         await _delete(branch);
