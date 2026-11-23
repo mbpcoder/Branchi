@@ -494,6 +494,8 @@ class _BranchSidebarState extends State<BranchSidebar> {
         Overlay.of(context).context.findRenderObject() as RenderBox;
     final action = await showMenu<String>(
       context: context,
+      // Wider than the default 280px, so branch names fit on a line or two.
+      constraints: const BoxConstraints(minWidth: 180, maxWidth: 360),
       position: RelativeRect.fromRect(
         position & const Size(1, 1),
         Offset.zero & overlay.size,
@@ -505,36 +507,42 @@ class _BranchSidebarState extends State<BranchSidebar> {
         if (canMergeIn)
           PopupMenuItem(
             value: 'merge',
-            child: Text(translate('merge_menu')
-                .replaceAll('{source}', branch.name)
-                .replaceAll('{target}', current)),
+            child: _MenuLabel(
+              translate('bs_merge_into_current'),
+              detail: '${branch.name} → $current',
+            ),
           ),
         if (canMergeIn)
           PopupMenuItem(
             value: 'rebase',
-            child: Text(translate('rebase_menu')
-                .replaceAll('{source}', branch.name)
-                .replaceAll('{target}', current)),
+            child: _MenuLabel(
+              translate('bs_rebase_current_onto'),
+              detail: '$current → ${branch.name}',
+            ),
           ),
         if (base != null)
           PopupMenuItem(
             value: 'merge_base',
-            child: Text(translate('merge_menu_update_from')
+            child: _MenuLabel(translate('merge_menu_update_from')
                 .replaceAll('{source}', _baseLabel(base) ?? base)
                 .replaceAll('{count}', '${branch.baseBehind}')),
           ),
         if (mergeBaseInto != null)
           PopupMenuItem(
             value: 'merge_base_into',
-            child: Text(translate('merge_menu')
-                .replaceAll('{source}', _baseLabel(mergeBaseInto)!)
-                .replaceAll('{target}', branch.name)),
+            child: _MenuLabel(
+              translate('bs_merge_base_into_this')
+                  .replaceAll('{base}', _baseLabel(mergeBaseInto)!),
+              detail: '${_baseLabel(mergeBaseInto)} → ${branch.name}',
+            ),
           ),
         if (hasMergeItems) const PopupMenuDivider(),
         PopupMenuItem(
           value: 'new_branch',
-          child: Text(translate('bs_new_branch_from')
-              .replaceAll('{branch}', branch.name)),
+          child: _MenuLabel(
+            translate('bs_new_branch_from'),
+            detail: branch.name,
+          ),
         ),
         const PopupMenuDivider(),
         if (!branch.isRemote)
@@ -1257,6 +1265,40 @@ class _BranchTile extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// A branch menu item: what it does, with the branch names it acts on
+/// underneath in small text. Names wrap instead of being cut off.
+class _MenuLabel extends StatelessWidget {
+  const _MenuLabel(this.title, {this.detail});
+
+  final String title;
+  final String? detail;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(title),
+          if (detail != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              // Branch names read left to right, also in RTL.
+              child: Text(
+                detail!,
+                textDirection: TextDirection.ltr,
+                style: TextStyle(fontSize: 11, color: b.muted),
+              ),
+            ),
+        ],
       ),
     );
   }
