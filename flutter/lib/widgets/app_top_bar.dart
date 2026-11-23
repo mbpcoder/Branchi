@@ -6,18 +6,24 @@ import '../repo/git_actions.dart';
 import '../repo/repo_controller.dart';
 import '../theme/app_theme.dart';
 import 'auto_pull_button.dart';
+import 'tab_bar_row.dart';
 
-/// Height of [AppTopBar].
-const double kAppTopBarHeight = 52;
+/// Height of the first row of [AppTopBar] (title + tabs).
+const double kAppTopBarHeight = 44;
 
-/// The window's 52px top bar:
+/// Height of the active repository's toolbar, the second row.
+const double kRepoToolbarHeight = 46;
+
+/// The window's top area, outermost first:
 ///
-/// `Branchi / <repo ▾>  [branch]  [History | Changes N | Files]  …
-///  [● Auto 1:42 ▾]  Fetch  Pull  [Push]  ☾ 📌 ⚙`
+/// 1. `Branchi  [tab] [tab] [+]  …  ☾ 📌 ⚙` - the open tabs, with the
+///    app-wide buttons.
+/// 2. `[branch]  [History | Changes N | Files | Report]  …
+///    [● Auto 1:42 ▾]  Fetch  Pull  [Push]` - the selected tab's
+///    repository toolbar; only when that tab has a repository open
+///    ([controller] non-null).
 ///
-/// The repo name opens a switcher over the open tabs (plus "New tab" /
-/// "Close tab"). The repo-specific controls only show when the active tab
-/// is bound to a repository ([controller] non-null).
+/// Everything under the tabs belongs to the selected tab.
 class AppTopBar extends StatelessWidget {
   const AppTopBar({
     super.key,
@@ -52,65 +58,51 @@ class AppTopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final controller = this.controller;
-    if (controller == null) return _buildBar(context, null);
-    return ListenableBuilder(
-      listenable: controller,
-      builder: (context, _) => _buildBar(context, controller),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildTitleRow(context),
+        if (controller != null)
+          ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) => _buildRepoToolbar(context, controller),
+          ),
+      ],
     );
   }
 
-  Widget _buildBar(BuildContext context, RepoController? controller) {
+  Widget _buildTitleRow(BuildContext context) {
     final b = context.branchi;
     return Container(
       height: kAppTopBarHeight,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsetsDirectional.only(start: 20, end: 12),
       decoration: BoxDecoration(
         color: b.bg,
         border: Border(bottom: BorderSide(color: b.line)),
       ),
       child: Row(
         children: [
-          Expanded(
-            child: Row(
-              children: [
-                Text(
-                  'Branchi',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -0.13,
-                    color: b.fg,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Text('/', style: TextStyle(color: b.muted)),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: _RepoSwitcher(
-                    tabs: tabs,
-                    activeIndex: activeIndex,
-                    onSelectTab: onSelectTab,
-                    onCloseTab: onCloseTab,
-                    onAddTab: onAddTab,
-                  ),
-                ),
-                if (controller != null) ...[
-                  const SizedBox(width: 12),
-                  _BranchPill(controller: controller),
-                  const SizedBox(width: 32),
-                  _SectionTabs(controller: controller),
-                ],
-              ],
+          Text(
+            'Branchi',
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.13,
+              color: b.fg,
             ),
           ),
-          if (controller != null) ...[
-            AutoPullButton(
-              watcher: controller.watcher,
-              isBusy: controller.isPulling,
+          const SizedBox(width: 16),
+          Expanded(
+            child: TabBarRow(
+              tabs: tabs,
+              activeIndex: activeIndex,
+              onSelect: onSelectTab,
+              onClose: onCloseTab,
+              onAddTab: onAddTab,
+              embedded: true,
             ),
-            const SizedBox(width: 12),
-            _RemoteActions(controller: controller),
-            const SizedBox(width: 8),
-          ],
+          ),
+          const SizedBox(width: 8),
           IconButton(
             tooltip: isDark
                 ? translate('switch_to_light_mode')
@@ -136,84 +128,34 @@ class AppTopBar extends StatelessWidget {
       ),
     );
   }
-}
 
-/// "<repo name> ▾": switches between open tabs, opens / closes tabs.
-class _RepoSwitcher extends StatelessWidget {
-  const _RepoSwitcher({
-    required this.tabs,
-    required this.activeIndex,
-    required this.onSelectTab,
-    required this.onCloseTab,
-    required this.onAddTab,
-  });
-
-  final List<RepoTab> tabs;
-  final int activeIndex;
-  final ValueChanged<int> onSelectTab;
-  final ValueChanged<int> onCloseTab;
-  final VoidCallback onAddTab;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildRepoToolbar(BuildContext context, RepoController controller) {
     final b = context.branchi;
-    return MenuAnchor(
-      alignmentOffset: const Offset(0, 6),
-      style: const MenuStyle(minimumSize: WidgetStatePropertyAll(Size(220, 0))),
-      menuChildren: [
-        for (var i = 0; i < tabs.length; i++)
-          MenuItemButton(
-            onPressed: () => onSelectTab(i),
-            leadingIcon: SizedBox(
-              width: 14,
-              child: i == activeIndex
-                  ? Icon(Icons.check, size: 14, color: b.accent)
-                  : null,
-            ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 320),
-              child: Text(
-                tabs[i].title,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: i == activeIndex ? b.fg : b.muted,
-                  fontWeight: i == activeIndex
-                      ? FontWeight.w500
-                      : FontWeight.w400,
-                ),
-              ),
+    return Container(
+      height: kRepoToolbarHeight,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(
+        color: b.bg,
+        border: Border(bottom: BorderSide(color: b.line)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Row(
+              children: [
+                Flexible(child: _BranchPill(controller: controller)),
+                const SizedBox(width: 24),
+                _SectionTabs(controller: controller),
+              ],
             ),
           ),
-        const Divider(height: 13, indent: 4, endIndent: 4),
-        MenuItemButton(
-          onPressed: onAddTab,
-          leadingIcon: Icon(Icons.add, size: 14, color: b.muted),
-          child: Text(translate('new_tab')),
-        ),
-        MenuItemButton(
-          onPressed: () => onCloseTab(activeIndex),
-          leadingIcon: Icon(Icons.close, size: 14, color: b.muted),
-          child: Text(translate('close_tab')),
-        ),
-      ],
-      builder: (context, menu, _) => _HoverBox(
-        tooltip: translate('switch_repository'),
-        onTap: () => menu.isOpen ? menu.close() : menu.open(),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: Text(
-                tabs[activeIndex].title,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: b.fg),
-              ),
-            ),
-            const SizedBox(width: 6),
-            Icon(Icons.keyboard_arrow_down, size: 14, color: b.muted),
-          ],
-        ),
+          AutoPullButton(
+            watcher: controller.watcher,
+            isBusy: controller.isPulling,
+          ),
+          const SizedBox(width: 12),
+          _RemoteActions(controller: controller),
+        ],
       ),
     );
   }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
@@ -22,12 +24,59 @@ class CommitList extends StatefulWidget {
 
 class _CommitListState extends State<CommitList> {
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scroll = ScrollController();
   String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    // E.g. History opened from line blame with a commit already selected.
+    if (widget.selectedId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _revealSelected());
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant CommitList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.selectedId != null && widget.selectedId != oldWidget.selectedId) {
+      // After layout, so the list knows its size.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _revealSelected());
+    }
+  }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _scroll.dispose();
     super.dispose();
+  }
+
+  /// Scrolls the selected commit into the middle of the list if it's off
+  /// screen, e.g. when it was selected from line blame in the editor.
+  void _revealSelected() {
+    if (!mounted || !_scroll.hasClients) return;
+    final commits = _filteredCommits;
+    final index = commits.indexWhere((c) => c.id == widget.selectedId);
+    if (index == -1) return;
+    final position = _scroll.position;
+    final viewport = position.viewportDimension;
+    // Every row has the same height (see prototypeItem below).
+    final rowExtent = (position.maxScrollExtent + viewport) / commits.length;
+    if (rowExtent <= 0) return;
+    final top = index * rowExtent;
+    final visible = top >= position.pixels &&
+        top + rowExtent <= position.pixels + viewport;
+    if (visible) return;
+    final target = (top - (viewport - rowExtent) / 2)
+        .clamp(0.0, position.maxScrollExtent);
+    unawaited(
+      _scroll.animateTo(
+        target,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOutCubic,
+      ),
+    );
   }
 
   List<CommitEntry> get _filteredCommits {
@@ -71,7 +120,17 @@ class _CommitListState extends State<CommitList> {
                   ),
                 )
               : ListView.builder(
+                  controller: _scroll,
                   itemCount: commits.length,
+                  // All rows are one line of summary + one of metadata, so
+                  // they share a height; this also makes scrolling to a
+                  // commit exact.
+                  prototypeItem: _CommitTile(
+                    commit: commits.first,
+                    now: now,
+                    selected: false,
+                    onTap: () {},
+                  ),
                   itemBuilder: (context, index) {
                     final commit = commits[index];
                     return _CommitTile(

@@ -10,7 +10,7 @@ use serde::Serialize;
 use std::path::Path;
 
 pub struct GitRepo {
-    repo: Repository,
+    pub(crate) repo: Repository,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -41,6 +41,34 @@ pub struct CommitInfo {
     pub parent_ids: Vec<String>,
 }
 
+static PRUNE_ON_FETCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Whether fetches remove remote-tracking branches that were deleted on the
+/// remote (`git fetch --prune`). On by default; the app sets it from its
+/// settings.
+pub fn set_prune_on_fetch(enabled: bool) {
+    PRUNE_ON_FETCH.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn prune_on_fetch() -> bool {
+    PRUNE_ON_FETCH.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A run of lines last changed by the same commit, from [`GitRepo::blame`].
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct BlameHunk {
+    /// 1-based first line in the blamed text.
+    pub start_line: usize,
+    pub lines: usize,
+    /// None for lines that aren't committed yet.
+    pub commit_id: Option<String>,
+    /// Author with `.mailmap` applied; empty when uncommitted.
+    pub author: String,
+    pub email: String,
+    pub time: Option<DateTime<Utc>>,
+    pub summary: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct BranchInfo {
     pub name: String,
@@ -50,6 +78,22 @@ pub struct BranchInfo {
     /// `origin/main`), or `None` when it isn't merged or is the default
     /// branch itself. See [`GitRepo::default_branch`].
     pub merged_into: Option<String>,
+    /// When the branch's tip commit was made (committer time), for sorting
+    /// by recent activity. Git doesn't record when a branch was created.
+    pub last_commit_time: Option<DateTime<Utc>>,
+    /// For a local branch: the remote branch it corresponds to - its
+    /// upstream, else a same-named branch on a remote (`origin` first).
+    pub remote_counterpart: Option<String>,
+    /// Commits on this local branch that its counterpart doesn't have (to
+    /// push), and the reverse (to pull). 0 without a counterpart.
+    pub ahead: usize,
+    pub behind: usize,
+    /// For a local branch other than the base itself: the branch it is
+    /// compared with (e.g. `origin/main`), and how many commits it has that
+    /// the base doesn't (`base_ahead`) and the reverse (`base_behind`).
+    pub base: Option<String>,
+    pub base_ahead: usize,
+    pub base_behind: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -413,6 +457,14 @@ impl GitRepo {
     /// Local and remote-tracking branches, each marked with whether it is
     /// already merged into the default branch.
     pub fn branches(&self) -> Result<Vec<BranchInfo>> {
+        self.branches_compared_with(None)
+    }
+
+    /// Like [`branches`](Self::branches), with each local branch's
+    /// ahead/behind counted against `compare_base` (a local or remote
+    /// branch name) instead of the default branch. An unknown name falls
+    /// back to the default branch.
+    pub fn branches_compared_with(&self, compare_base: Option<&str>) -> Result<Vec<BranchInfo>> {
         let head_name = self
             .repo
             .head()
@@ -425,6 +477,28 @@ impl GitRepo {
         // `origin/main`, and the reverse) is the same line of work, so it
         // isn't marked as merged either.
         let base_names: Vec<String> = match &base {
+            Some((name, _)) => match name.split_once('/') {
+                Some((_, short)) if self.is_remote_branch(name) => {
+                    vec![name.clone(), short.to_string()]
+                }
+                _ => vec![name.clone()],
+            },
+            None => Vec::new(),
+        };
+
+        // What local branches are counted against: the chosen branch, else
+        // the default branch. Its own rows (both sides) show no counts.
+        let compare = compare_base
+            .and_then(|name| {
+                let branch = self
+                    .repo
+                    .find_branch(name, git2::BranchType::Local)
+                    .or_else(|_| self.repo.find_branch(name, git2::BranchType::Remote))
+                    .ok()?;
+                Some((name.to_string(), branch.get().target()?))
+            })
+            .or_else(|| base.clone());
+        let compare_names: Vec<String> = match &compare {
             Some((name, _)) => match name.split_once('/') {
                 Some((_, short)) if self.is_remote_branch(name) => {
                     vec![name.clone(), short.to_string()]
@@ -457,15 +531,92 @@ impl GitRepo {
                 _ => None,
             };
 
+            let last_commit_time = branch
+                .get()
+                .peel_to_commit()
+                .ok()
+                .and_then(|c| DateTime::<Utc>::from_timestamp(c.time().seconds(), 0));
+
+            let (remote_counterpart, ahead, behind) = if is_remote {
+                (None, 0, 0)
+            } else {
+                self.remote_counterpart(&branch, &name)
+            };
+
+            let (cmp_base, base_ahead, base_behind) = match (&compare, branch.get().target()) {
+                (Some((cmp_name, cmp_tip)), Some(tip))
+                    if !is_remote && !compare_names.iter().any(|n| n == &name) =>
+                {
+                    match self.repo.graph_ahead_behind(tip, *cmp_tip) {
+                        Ok((a, b)) => (Some(cmp_name.clone()), a, b),
+                        Err(_) => (None, 0, 0),
+                    }
+                }
+                _ => (None, 0, 0),
+            };
+
             result.push(BranchInfo {
                 name,
                 is_head,
                 is_remote,
                 merged_into,
+                last_commit_time,
+                remote_counterpart,
+                ahead,
+                behind,
+                base: cmp_base,
+                base_ahead,
+                base_behind,
             });
         }
 
         Ok(result)
+    }
+
+    /// The remote branch matching local branch `name` and how far apart
+    /// they are: its upstream if set, else `<remote>/<name>` on the first
+    /// remote that has it (`origin` first).
+    fn remote_counterpart(
+        &self,
+        branch: &git2::Branch,
+        name: &str,
+    ) -> (Option<String>, usize, usize) {
+        let upstream = branch
+            .upstream()
+            .ok()
+            .and_then(|u| u.name().ok().flatten().map(str::to_string));
+        let counterpart = upstream.or_else(|| {
+            let mut remotes: Vec<String> = self
+                .repo
+                .remotes()
+                .ok()?
+                .iter()
+                .flatten()
+                .map(str::to_string)
+                .collect();
+            remotes.sort_by_key(|r| r != "origin");
+            remotes
+                .into_iter()
+                .map(|r| format!("{r}/{name}"))
+                .find(|candidate| {
+                    self.repo
+                        .find_branch(candidate, git2::BranchType::Remote)
+                        .is_ok()
+                })
+        });
+        let Some(counterpart) = counterpart else {
+            return (None, 0, 0);
+        };
+        let tips = branch.get().target().zip(
+            self.repo
+                .find_branch(&counterpart, git2::BranchType::Remote)
+                .ok()
+                .and_then(|b| b.get().target()),
+        );
+        let (ahead, behind) = tips
+            .and_then(|(local, remote)| self.repo.graph_ahead_behind(local, remote).ok())
+            .unwrap_or((0, 0));
+        (Some(counterpart), ahead, behind)
     }
 
     /// The branch other branches are checked against for "already merged":
@@ -632,6 +783,10 @@ impl GitRepo {
 
         let mut fetch_options = git2::FetchOptions::new();
         fetch_options.remote_callbacks(callbacks);
+        if prune_on_fetch() {
+            // Drop remote-tracking branches deleted on the server.
+            fetch_options.prune(git2::FetchPrune::On);
+        }
 
         remote
             .fetch(&[] as &[&str], Some(&mut fetch_options), None)
@@ -907,8 +1062,13 @@ impl GitRepo {
             .signature()
             .context("no user.name/user.email configured for this repository")?;
 
+        if index.has_conflicts() {
+            anyhow::bail!("Resolve all conflicts before committing.");
+        }
+        // Finishing a merge: the merged branch becomes the second parent.
         let parent = self.repo.head().ok().and_then(|h| h.peel_to_commit().ok());
-        let parents: Vec<&git2::Commit> = parent.iter().collect();
+        let merged = self.merge_head()?;
+        let parents: Vec<&git2::Commit> = parent.iter().chain(merged.iter()).collect();
 
         let oid = self.repo.commit(
             Some("HEAD"),
@@ -918,6 +1078,7 @@ impl GitRepo {
             &tree,
             &parents,
         )?;
+        self.clear_merge_state()?;
 
         Ok(oid.to_string())
     }
@@ -1041,6 +1202,101 @@ impl GitRepo {
             deletions: files.iter().map(|f| f.deletions).sum(),
             files,
         })
+    }
+
+    /// Who last changed each line of `rel_path` (relative to the repo root,
+    /// `/`-separated). With `contents`, blames that text instead of the
+    /// committed file, so uncommitted edits show as uncommitted lines and
+    /// the line numbers match what the editor shows.
+    pub fn blame(&self, rel_path: &str, contents: Option<&str>) -> Result<Vec<BlameHunk>> {
+        let line_count = |text: &str| text.lines().count().max(1);
+        let uncommitted = |lines: usize| BlameHunk {
+            start_line: 1,
+            lines,
+            commit_id: None,
+            author: String::new(),
+            email: String::new(),
+            time: None,
+            summary: String::new(),
+        };
+
+        // A new file (or an empty repository) has no history to blame.
+        let tracked = self
+            .repo
+            .head()
+            .ok()
+            .and_then(|head| head.peel_to_tree().ok())
+            .is_some_and(|tree| tree.get_path(Path::new(rel_path)).is_ok());
+        if !tracked {
+            let lines = match contents {
+                Some(text) => line_count(text),
+                None => {
+                    let workdir = self.repo.workdir().context("bare repository")?;
+                    line_count(&std::fs::read_to_string(workdir.join(rel_path))?)
+                }
+            };
+            return Ok(vec![uncommitted(lines)]);
+        }
+
+        let mut options = git2::BlameOptions::new();
+        options.use_mailmap(true);
+        let blame = self
+            .repo
+            .blame_file(Path::new(rel_path), Some(&mut options))
+            .with_context(|| format!("failed to blame {rel_path}"))?;
+        let blame = match contents {
+            Some(text) => blame.blame_buffer(text.as_bytes())?,
+            None => blame,
+        };
+
+        // Author and summary come from the commit itself, not the hunk: after
+        // `blame_buffer`, split hunks can carry no signature at all (git2
+        // then dereferences a null pointer).
+        let mailmap = self.repo.mailmap().ok();
+        type CommitInfoParts = (String, String, Option<DateTime<Utc>>, String);
+        let mut commits = std::collections::HashMap::<git2::Oid, CommitInfoParts>::new();
+        let mut hunks = Vec::with_capacity(blame.len());
+        for hunk in blame.iter() {
+            let id = hunk.final_commit_id();
+            let start_line = hunk.final_start_line();
+            let lines = hunk.lines_in_hunk();
+            if id.is_zero() {
+                hunks.push(BlameHunk {
+                    start_line,
+                    lines,
+                    ..uncommitted(lines)
+                });
+                continue;
+            }
+            let (author, email, time, summary) = commits
+                .entry(id)
+                .or_insert_with(|| {
+                    let Ok(commit) = self.repo.find_commit(id) else {
+                        return Default::default();
+                    };
+                    let summary = commit.summary().unwrap_or_default().to_string();
+                    match Self::mapped_author(&commit, mailmap.as_ref()) {
+                        Ok(sig) => (
+                            sig.name().unwrap_or_default().to_string(),
+                            sig.email().unwrap_or_default().to_string(),
+                            DateTime::<Utc>::from_timestamp(sig.when().seconds(), 0),
+                            summary,
+                        ),
+                        Err(_) => (String::new(), String::new(), None, summary),
+                    }
+                })
+                .clone();
+            hunks.push(BlameHunk {
+                start_line,
+                lines,
+                commit_id: Some(id.to_string()),
+                author,
+                email,
+                time,
+                summary,
+            });
+        }
+        Ok(hunks)
     }
 
     /// A commit's author with the repository's `.mailmap` applied (so one
@@ -1267,6 +1523,55 @@ mod tests {
 
     fn write_file(dir: &Path, name: &str, contents: &str) {
         fs::write(dir.join(name), contents).unwrap();
+    }
+
+    #[test]
+    fn blame_reports_commits_and_uncommitted_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        write_file(dir.path(), "a.txt", "one\ntwo\n");
+        repo.stage("a.txt").unwrap();
+        let first = repo.commit("first", "Alice", "alice@example.com").unwrap();
+        write_file(dir.path(), "a.txt", "one\ntwo\nthree\n");
+        repo.stage("a.txt").unwrap();
+        let second = repo.commit("add three", "Bob", "bob@example.com").unwrap();
+
+        let hunks = repo.blame("a.txt", None).unwrap();
+        assert_eq!(hunks.len(), 2);
+        assert_eq!(hunks[0].start_line, 1);
+        assert_eq!(hunks[0].lines, 2);
+        assert_eq!(hunks[0].commit_id.as_deref(), Some(first.as_str()));
+        assert_eq!(hunks[0].author, "Alice");
+        assert_eq!(hunks[0].summary, "first");
+        assert_eq!(hunks[1].start_line, 3);
+        assert_eq!(hunks[1].commit_id.as_deref(), Some(second.as_str()));
+
+        // Unsaved/uncommitted edits: a new first line shifts the rest down.
+        let hunks = repo
+            .blame("a.txt", Some("zero\none\ntwo\nthree\n"))
+            .unwrap();
+        assert_eq!(hunks[0].start_line, 1);
+        assert_eq!(hunks[0].commit_id, None);
+        let line3 = hunks
+            .iter()
+            .find(|h| h.start_line <= 3 && 3 < h.start_line + h.lines)
+            .unwrap();
+        assert_eq!(line3.author, "Alice");
+
+        // A line inserted in the middle splits a committed hunk; the split
+        // parts must still report their commit (this used to crash).
+        let hunks = repo
+            .blame("a.txt", Some("one\ninserted\ntwo\nthree\n"))
+            .unwrap();
+        let authors: Vec<_> = hunks.iter().map(|h| h.author.as_str()).collect();
+        assert_eq!(authors, vec!["Alice", "", "Alice", "Bob"]);
+
+        // Untracked file: all uncommitted.
+        write_file(dir.path(), "new.txt", "x\ny\n");
+        let hunks = repo.blame("new.txt", None).unwrap();
+        assert_eq!(hunks.len(), 1);
+        assert_eq!(hunks[0].lines, 2);
+        assert_eq!(hunks[0].commit_id, None);
     }
 
     #[test]
@@ -1630,6 +1935,51 @@ mod tests {
     }
 
     #[test]
+    fn branches_count_ahead_behind_against_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        repo.commit("init", "Ann", "ann@example.com").unwrap();
+        let base = repo.repo.head().unwrap().shorthand().unwrap().to_string();
+
+        repo.create_branch("develop", None).unwrap();
+        repo.create_branch("feature", None).unwrap();
+        repo.checkout_branch("feature").unwrap();
+        for f in ["b.txt", "c.txt"] {
+            write_file(dir.path(), f, f);
+            repo.stage(f).unwrap();
+            repo.commit(f, "Bob", "bob@example.com").unwrap();
+        }
+        repo.checkout_branch(&base).unwrap();
+        write_file(dir.path(), "m.txt", "m");
+        repo.stage("m.txt").unwrap();
+        repo.commit("main work", "Ann", "ann@example.com").unwrap();
+
+        let find = |list: &[BranchInfo], name: &str| {
+            list.iter().find(|b| b.name == name).cloned().unwrap()
+        };
+        let list = repo.branches().unwrap();
+        let feature = find(&list, "feature");
+        assert_eq!(feature.base.as_deref(), Some(base.as_str()));
+        assert_eq!((feature.base_ahead, feature.base_behind), (2, 1));
+        let main = find(&list, &base);
+        assert_eq!(main.base, None);
+
+        // Against "develop" instead: it has none of main's or feature's work.
+        let list = repo.branches_compared_with(Some("develop")).unwrap();
+        let feature = find(&list, "feature");
+        assert_eq!(feature.base.as_deref(), Some("develop"));
+        assert_eq!((feature.base_ahead, feature.base_behind), (2, 0));
+        assert_eq!(find(&list, "develop").base, None);
+        assert_eq!(find(&list, &base).base_ahead, 1);
+
+        // An unknown base falls back to the default branch.
+        let list = repo.branches_compared_with(Some("nope")).unwrap();
+        assert_eq!(find(&list, "feature").base.as_deref(), Some(base.as_str()));
+    }
+
+    #[test]
     fn branches_marks_merged_into_local_default() {
         let dir = tempfile::tempdir().unwrap();
         let repo = GitRepo::init(dir.path()).unwrap();
@@ -1848,6 +2198,65 @@ mod tests {
         let log = local_repo.log(10).unwrap();
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].summary, "second");
+    }
+
+    #[test]
+    fn fetch_prunes_branches_deleted_on_the_remote() {
+        let remote_dir = tempfile::tempdir().unwrap();
+        let remote_repo = GitRepo::init(remote_dir.path()).unwrap();
+        write_file(remote_dir.path(), "a.txt", "one");
+        remote_repo.stage("a.txt").unwrap();
+        remote_repo
+            .commit("init", "Test User", "test@example.com")
+            .unwrap();
+        let head = remote_repo.repo.head().unwrap().peel_to_commit().unwrap();
+        remote_repo.repo.branch("feature", &head, false).unwrap();
+
+        let local_dir = tempfile::tempdir().unwrap();
+        let local_repo =
+            GitRepo::clone(remote_dir.path().to_str().unwrap(), local_dir.path()).unwrap();
+        let remote_names = |repo: &GitRepo| -> Vec<String> {
+            repo.branches()
+                .unwrap()
+                .into_iter()
+                .filter(|b| b.is_remote)
+                .map(|b| b.name)
+                .collect()
+        };
+        assert!(remote_names(&local_repo).contains(&"origin/feature".to_string()));
+        let main = local_repo
+            .branches()
+            .unwrap()
+            .into_iter()
+            .find(|b| !b.is_remote)
+            .unwrap();
+        assert!(main.last_commit_time.is_some());
+        assert_eq!(
+            main.remote_counterpart.as_deref(),
+            Some(format!("origin/{}", main.name).as_str())
+        );
+        assert_eq!((main.ahead, main.behind), (0, 0));
+        write_file(local_dir.path(), "b.txt", "local");
+        local_repo.stage("b.txt").unwrap();
+        local_repo
+            .commit("local", "Test User", "t@example.com")
+            .unwrap();
+        let main = local_repo
+            .branches()
+            .unwrap()
+            .into_iter()
+            .find(|b| !b.is_remote)
+            .unwrap();
+        assert_eq!((main.ahead, main.behind), (1, 0));
+
+        remote_repo
+            .repo
+            .find_branch("feature", git2::BranchType::Local)
+            .unwrap()
+            .delete()
+            .unwrap();
+        local_repo.fetch_remote_for_branch("origin/HEAD").unwrap();
+        assert!(!remote_names(&local_repo).contains(&"origin/feature".to_string()));
     }
 
     #[test]

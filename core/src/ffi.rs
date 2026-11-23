@@ -123,6 +123,25 @@ pub unsafe extern "C" fn branchi_branches(path: *const c_char) -> *mut c_char {
     result_to_json_c_string(result)
 }
 
+/// Like [`branchi_branches`], with local branches' `base_ahead` /
+/// `base_behind` counted against `compare_base` (a branch name) instead of
+/// the default branch. `compare_base` may be null for the default.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string; `compare_base`
+/// must be null or one. Both must outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_branches_compared_with(
+    path: *const c_char,
+    compare_base: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let compare_base = (!compare_base.is_null()).then(|| c_str_to_string(compare_base));
+    let result =
+        GitRepo::open(&path).and_then(|repo| repo.branches_compared_with(compare_base.as_deref()));
+    result_to_json_c_string(result)
+}
+
 /// Returns the file-level diff of `commit_id` against its first parent (or
 /// the empty tree, for a root commit) as a JSON string:
 /// `{"ok": [DiffFileEntry, ...]}` or `{"error": "..."}`.
@@ -509,6 +528,97 @@ pub unsafe extern "C" fn branchi_global_config_set(
     result_to_c_string(git::set_global_identity(&name, &email))
 }
 
+/// Moves `path` (a file or directory) to the OS trash / Recycle Bin.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
+/// call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_move_to_trash(path: *const c_char) -> *mut c_char {
+    let path = c_str_to_string(path);
+    result_to_c_string(crate::fs_ops::move_to_trash(&path))
+}
+
+/// Fuzzy-finds files under `root` matching `query` (`.gitignore`d files
+/// and `.git` skipped), best first, at most `limit`. With `refresh` the
+/// cached file list for `root` is rebuilt first. Returns
+/// `{"ok": [FileMatch, ...]}` or `{"error": "..."}`.
+///
+/// # Safety
+/// `root` and `query` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_find_files(
+    root: *const c_char,
+    query: *const c_char,
+    limit: usize,
+    refresh: bool,
+) -> *mut c_char {
+    let root = c_str_to_string(root);
+    let query = c_str_to_string(query);
+    result_to_json_c_string(crate::file_search::find_files(
+        &root, &query, limit, refresh,
+    ))
+}
+
+/// Searches the contents of every non-ignored text file under `root` for
+/// `query` (literal text unless `regex`). Returns
+/// `{"ok": {"matches": [ContentMatch, ...], "truncated": bool}}` or
+/// `{"error": "..."}` (e.g. for an invalid regex).
+///
+/// # Safety
+/// `root` and `query` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_search_content(
+    root: *const c_char,
+    query: *const c_char,
+    regex: bool,
+    case_sensitive: bool,
+    whole_word: bool,
+    max_matches: usize,
+) -> *mut c_char {
+    let root = c_str_to_string(root);
+    let query = c_str_to_string(query);
+    let options = crate::content_search::ContentSearchOptions {
+        regex,
+        case_sensitive,
+        whole_word,
+        max_matches,
+    };
+    result_to_json_c_string(crate::content_search::search_content(
+        &root, &query, &options,
+    ))
+}
+
+/// Blames `rel_path` (relative to the repo at `path`, `/`-separated).
+/// `contents` may be null to blame the committed file, or the editor's
+/// text so uncommitted lines show as such. Returns
+/// `{"ok": [BlameHunk, ...]}` or `{"error": "..."}`.
+///
+/// # Safety
+/// `path` and `rel_path` must be valid, NUL-terminated UTF-8 C strings,
+/// and `contents` null or one, all outliving the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_blame(
+    path: *const c_char,
+    rel_path: *const c_char,
+    contents: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let rel_path = c_str_to_string(rel_path);
+    let contents = (!contents.is_null()).then(|| c_str_to_string(contents));
+    let result = GitRepo::open(&path).and_then(|repo| repo.blame(&rel_path, contents.as_deref()));
+    result_to_json_c_string(result)
+}
+
+/// Sets whether fetches (Fetch, Pull, auto-pull) remove remote-tracking
+/// branches that were deleted on the remote. On by default.
+#[no_mangle]
+pub extern "C" fn branchi_set_prune_on_fetch(enabled: bool) {
+    git::set_prune_on_fetch(enabled);
+}
+
 /// Releases a string previously returned by one of this module's
 /// functions. Safe to call with a null pointer (no-op).
 ///
@@ -552,4 +662,132 @@ mod tests {
         assert!(!err.is_null());
         unsafe { branchi_free_string(err) };
     }
+}
+
+/// What merging branch `source` into the current branch would bring in, as
+/// `{"ok": MergePreview}` or `{"error": "..."}`.
+///
+/// # Safety
+/// `path` and `source` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_merge_preview(
+    path: *const c_char,
+    source: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let source = c_str_to_string(source);
+    let result = GitRepo::open(&path).and_then(|repo| repo.merge_preview(&source));
+    result_to_json_c_string(result)
+}
+
+/// Merges branch `source` into the current branch. `mode` is `merge`,
+/// `no_ff` or `squash`. Returns `{"ok": MergeOutcome}` or `{"error": "..."}`.
+///
+/// # Safety
+/// All arguments must be valid, NUL-terminated UTF-8 C strings that outlive
+/// the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_merge(
+    path: *const c_char,
+    source: *const c_char,
+    mode: *const c_char,
+    message: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let source = c_str_to_string(source);
+    let mode = c_str_to_string(mode);
+    let message = c_str_to_string(message);
+    let result = crate::merge::MergeMode::parse(&mode)
+        .and_then(|mode| GitRepo::open(&path).and_then(|repo| repo.merge(&source, mode, &message)));
+    result_to_json_c_string(result)
+}
+
+/// The merge waiting to be finished: `{"ok": MergeState}`, `{"ok": null}`
+/// when there is none, or `{"error": "..."}`.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
+/// call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_merge_state(path: *const c_char) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let result = GitRepo::open(&path).and_then(|repo| repo.merge_state());
+    result_to_json_c_string(result)
+}
+
+/// Aborts the merge in progress. Returns null on success or an error
+/// string.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
+/// call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_abort_merge(path: *const c_char) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let result = GitRepo::open(&path).and_then(|repo| repo.abort_merge());
+    result_to_c_string(result)
+}
+
+/// Resolves the conflict in `file` by taking `side` (`ours` or `theirs`)
+/// whole. Returns null on success or an error string.
+///
+/// # Safety
+/// All arguments must be valid, NUL-terminated UTF-8 C strings that outlive
+/// the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_resolve_conflict(
+    path: *const c_char,
+    file: *const c_char,
+    side: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let file = c_str_to_string(file);
+    let side = c_str_to_string(side);
+    let result = GitRepo::open(&path).and_then(|repo| repo.resolve_conflict(&file, &side));
+    result_to_c_string(result)
+}
+
+/// Rebases the current branch onto branch `onto`. Returns
+/// `{"ok": MergeOutcome}` or `{"error": "..."}`.
+///
+/// # Safety
+/// `path` and `onto` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_rebase(path: *const c_char, onto: *const c_char) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let onto = c_str_to_string(onto);
+    let result = GitRepo::open(&path).and_then(|repo| repo.rebase(&onto));
+    result_to_json_c_string(result)
+}
+
+/// Continues a stopped rebase, committing the resolved step with `message`
+/// (null keeps the original). Returns `{"ok": MergeOutcome}` or an error.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string; `message` must be
+/// null or one. Both must outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_continue_rebase(
+    path: *const c_char,
+    message: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let message = (!message.is_null()).then(|| c_str_to_string(message));
+    let result = GitRepo::open(&path).and_then(|repo| repo.continue_rebase(message.as_deref()));
+    result_to_json_c_string(result)
+}
+
+/// Skips the commit a rebase stopped on. Returns `{"ok": MergeOutcome}` or
+/// an error.
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 C string that outlives the
+/// call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_skip_rebase_commit(path: *const c_char) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let result = GitRepo::open(&path).and_then(|repo| repo.skip_rebase_commit());
+    result_to_json_c_string(result)
 }

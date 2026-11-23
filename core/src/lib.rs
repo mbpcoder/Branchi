@@ -5,10 +5,14 @@
 //! into the app (e.g. via `flutter_rust_bridge`), the same way RustDesk
 //! splits its `libs/` core from its `flutter/` UI.
 
+pub mod content_search;
 pub mod db;
 pub mod ffi;
+pub mod file_search;
+pub mod fs_ops;
 pub mod git;
 pub mod logging;
+pub mod merge;
 
 pub fn welcome_message() -> String {
     "Welcome to Branchi".to_string()

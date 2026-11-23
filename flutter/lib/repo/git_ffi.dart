@@ -31,6 +31,53 @@ typedef _CloneDart = Pointer<Utf8> Function(
   Pointer<Utf8> path,
 );
 
+typedef _MoveToTrashNative = Pointer<Utf8> Function(Pointer<Utf8> path);
+typedef _MoveToTrashDart = Pointer<Utf8> Function(Pointer<Utf8> path);
+
+typedef _FindFilesNative = Pointer<Utf8> Function(
+  Pointer<Utf8> root,
+  Pointer<Utf8> query,
+  IntPtr limit,
+  Bool refresh,
+);
+typedef _FindFilesDart = Pointer<Utf8> Function(
+  Pointer<Utf8> root,
+  Pointer<Utf8> query,
+  int limit,
+  bool refresh,
+);
+
+typedef _SearchContentNative = Pointer<Utf8> Function(
+  Pointer<Utf8> root,
+  Pointer<Utf8> query,
+  Bool regex,
+  Bool caseSensitive,
+  Bool wholeWord,
+  IntPtr maxMatches,
+);
+typedef _SearchContentDart = Pointer<Utf8> Function(
+  Pointer<Utf8> root,
+  Pointer<Utf8> query,
+  bool regex,
+  bool caseSensitive,
+  bool wholeWord,
+  int maxMatches,
+);
+
+typedef _BlameNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> relPath,
+  Pointer<Utf8> contents,
+);
+typedef _BlameDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> relPath,
+  Pointer<Utf8> contents,
+);
+
+typedef _SetPruneOnFetchNative = Void Function(Bool enabled);
+typedef _SetPruneOnFetchDart = void Function(bool enabled);
+
 typedef _IsRepositoryNative = Bool Function(Pointer<Utf8> path);
 typedef _IsRepositoryDart = bool Function(Pointer<Utf8> path);
 
@@ -53,8 +100,14 @@ typedef _CommitStatsDart = Pointer<Utf8> Function(
 typedef _BranchReportNative = Pointer<Utf8> Function(Pointer<Utf8> path);
 typedef _BranchReportDart = Pointer<Utf8> Function(Pointer<Utf8> path);
 
-typedef _BranchesNative = Pointer<Utf8> Function(Pointer<Utf8> path);
-typedef _BranchesDart = Pointer<Utf8> Function(Pointer<Utf8> path);
+typedef _BranchesNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> compareBase,
+);
+typedef _BranchesDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> compareBase,
+);
 
 typedef _CommitDiffNative = Pointer<Utf8> Function(
   Pointer<Utf8> path,
@@ -110,6 +163,19 @@ typedef _UpdateBranchDart = Pointer<Utf8> Function(
 typedef _StatusNative = Pointer<Utf8> Function(Pointer<Utf8> path);
 typedef _StatusDart = Pointer<Utf8> Function(Pointer<Utf8> path);
 
+typedef _Str1 = Pointer<Utf8> Function(Pointer<Utf8> a);
+typedef _Str2 = Pointer<Utf8> Function(Pointer<Utf8> a, Pointer<Utf8> b);
+typedef _Str3 = Pointer<Utf8> Function(
+  Pointer<Utf8> a,
+  Pointer<Utf8> b,
+  Pointer<Utf8> c,
+);
+typedef _Str4 = Pointer<Utf8> Function(
+  Pointer<Utf8> a,
+  Pointer<Utf8> b,
+  Pointer<Utf8> c,
+  Pointer<Utf8> d,
+);
 typedef _StageNative = Pointer<Utf8> Function(
   Pointer<Utf8> path,
   Pointer<Utf8> filePath,
@@ -260,7 +326,7 @@ class GitFfi {
           'branchi_branch_report',
         ),
         _branches = lib.lookupFunction<_BranchesNative, _BranchesDart>(
-          'branchi_branches',
+          'branchi_branches_compared_with',
         ),
         _commitDiff =
             lib.lookupFunction<_CommitDiffNative, _CommitDiffDart>(
@@ -326,6 +392,38 @@ class GitFfi {
             _GlobalConfigGetDart>('branchi_global_config_get'),
         _globalConfigSet = lib.lookupFunction<_GlobalConfigSetNative,
             _GlobalConfigSetDart>('branchi_global_config_set'),
+        _blame = lib.lookupFunction<_BlameNative, _BlameDart>('branchi_blame'),
+        _mergePreview = lib.lookupFunction<_Str2, _Str2>(
+          'branchi_merge_preview',
+        ),
+        _merge = lib.lookupFunction<_Str4, _Str4>('branchi_merge'),
+        _mergeState = lib.lookupFunction<_Str1, _Str1>('branchi_merge_state'),
+        _abortMerge = lib.lookupFunction<_Str1, _Str1>('branchi_abort_merge'),
+        _resolveConflict = lib.lookupFunction<_Str3, _Str3>(
+          'branchi_resolve_conflict',
+        ),
+        _rebase = lib.lookupFunction<_Str2, _Str2>('branchi_rebase'),
+        _continueRebase = lib.lookupFunction<_Str2, _Str2>(
+          'branchi_continue_rebase',
+        ),
+        _skipRebase = lib.lookupFunction<_Str1, _Str1>(
+          'branchi_skip_rebase_commit',
+        ),
+        _setPruneOnFetch =
+            lib.lookupFunction<_SetPruneOnFetchNative, _SetPruneOnFetchDart>(
+          'branchi_set_prune_on_fetch',
+        ),
+        _searchContent =
+            lib.lookupFunction<_SearchContentNative, _SearchContentDart>(
+          'branchi_search_content',
+        ),
+        _findFiles = lib.lookupFunction<_FindFilesNative, _FindFilesDart>(
+          'branchi_find_files',
+        ),
+        _moveToTrash =
+            lib.lookupFunction<_MoveToTrashNative, _MoveToTrashDart>(
+          'branchi_move_to_trash',
+        ),
         _freeString = lib.lookupFunction<_FreeStringNative, _FreeStringDart>(
           'branchi_free_string',
         );
@@ -376,6 +474,91 @@ class GitFfi {
   final _RemoveRemoteDart _removeRemote;
   final _GlobalConfigGetDart _globalConfigGet;
   final _GlobalConfigSetDart _globalConfigSet;
+  final _MoveToTrashDart _moveToTrash;
+  final _FindFilesDart _findFiles;
+  final _SearchContentDart _searchContent;
+  final _BlameDart _blame;
+  final _SetPruneOnFetchDart _setPruneOnFetch;
+  final _Str2 _mergePreview;
+  final _Str4 _merge;
+  final _Str1 _mergeState;
+  final _Str1 _abortMerge;
+  final _Str3 _resolveConflict;
+  final _Str2 _rebase;
+  final _Str2 _continueRebase;
+  final _Str1 _skipRebase;
+
+  /// Rebases the current branch onto [onto]; returns the decoded outcome.
+  Map<String, dynamic> rebase(String path, String onto) =>
+      _withStrings([path, onto], (p) => _consumeJsonMap(_rebase(p[0], p[1])));
+
+  /// Continues a stopped rebase; [message] null keeps the commit's own.
+  Map<String, dynamic> continueRebase(String path, String? message) =>
+      _withStrings([path, ?message], (p) {
+        return _consumeJsonMap(
+          _continueRebase(p[0], p.length > 1 ? p[1] : nullptr),
+        );
+      });
+
+  /// Skips the commit the rebase stopped on.
+  Map<String, dynamic> skipRebaseCommit(String path) =>
+      _withStrings([path], (p) => _consumeJsonMap(_skipRebase(p[0])));
+
+  /// Runs [call] with [args] as native strings, freeing them afterwards.
+  T _withStrings<T>(List<String> args, T Function(List<Pointer<Utf8>>) call) {
+    final ptrs = [for (final a in args) a.toNativeUtf8()];
+    try {
+      return call(ptrs);
+    } finally {
+      for (final p in ptrs) {
+        malloc.free(p);
+      }
+    }
+  }
+
+  /// What merging branch [source] into the current branch would bring in.
+  Map<String, dynamic> mergePreview(String path, String source) =>
+      _withStrings([path, source], (p) => _consumeJsonMap(_mergePreview(p[0], p[1])));
+
+  /// Merges [source] into the current branch; [mode] is `merge`, `no_ff`
+  /// or `squash`. Returns the decoded outcome.
+  Map<String, dynamic> merge(
+    String path,
+    String source,
+    String mode,
+    String message,
+  ) =>
+      _withStrings(
+        [path, source, mode, message],
+        (p) => _consumeJsonMap(_merge(p[0], p[1], p[2], p[3])),
+      );
+
+  /// The merge waiting to be finished, or null.
+  Map<String, dynamic>? mergeState(String path) => _withStrings([path], (p) {
+        final resultPtr = _mergeState(p[0]);
+        final text = resultPtr.toDartString();
+        _freeString(resultPtr);
+        final decoded = jsonDecode(text) as Map<String, dynamic>;
+        if (decoded.containsKey('error')) {
+          throw GitFfiException(decoded['error'] as String);
+        }
+        return decoded['ok'] as Map<String, dynamic>?;
+      });
+
+  /// Aborts the merge in progress. Null on success, else the error.
+  String? abortMerge(String path) =>
+      _withStrings([path], (p) => _consumeError(_abortMerge(p[0])));
+
+  /// Takes [side] (`ours` / `theirs`) whole for conflicted [file].
+  String? resolveConflict(String path, String file, String side) =>
+      _withStrings(
+        [path, file, side],
+        (p) => _consumeError(_resolveConflict(p[0], p[1], p[2])),
+      );
+
+  /// Whether fetches (Fetch, Pull, auto-pull) remove remote branches that
+  /// were deleted on the remote. On by default in the core.
+  void setPruneOnFetch(bool enabled) => _setPruneOnFetch(enabled);
   final _FreeStringDart _freeString;
 
   /// Runs `git init` at [path] via the Rust core. Returns null on success,
@@ -411,6 +594,89 @@ class GitFfi {
       return _isRepository(pathPtr);
     } finally {
       malloc.free(pathPtr);
+    }
+  }
+
+  /// Moves [path] (a file or directory) to the OS trash / Recycle Bin.
+  /// Returns null on success, or an error message on failure.
+  String? moveToTrash(String path) {
+    final pathPtr = path.toNativeUtf8();
+    try {
+      return _consumeError(_moveToTrash(pathPtr));
+    } finally {
+      malloc.free(pathPtr);
+    }
+  }
+
+  /// Fuzzy-finds files under [root] matching [query], best first. Each
+  /// item is `{"path", "score", "positions"}`. [refresh] rebuilds the
+  /// cached file list first. Throws [GitFfiException] on failure.
+  List<dynamic> findFiles(
+    String root,
+    String query, {
+    int limit = 50,
+    bool refresh = false,
+  }) {
+    final rootPtr = root.toNativeUtf8();
+    final queryPtr = query.toNativeUtf8();
+    try {
+      return _consumeJsonList(_findFiles(rootPtr, queryPtr, limit, refresh));
+    } finally {
+      malloc.free(rootPtr);
+      malloc.free(queryPtr);
+    }
+  }
+
+  /// Searches file contents under [root] for [query]. Returns
+  /// `{"matches": [...], "truncated": bool}`; each match is
+  /// `{"path", "line", "column", "text", "ranges"}`. Throws
+  /// [GitFfiException] on failure, e.g. for an invalid regex.
+  Map<String, dynamic> searchContent(
+    String root,
+    String query, {
+    bool regex = false,
+    bool caseSensitive = false,
+    bool wholeWord = false,
+    int maxMatches = 2000,
+  }) {
+    final rootPtr = root.toNativeUtf8();
+    final queryPtr = query.toNativeUtf8();
+    try {
+      final resultPtr = _searchContent(
+        rootPtr,
+        queryPtr,
+        regex,
+        caseSensitive,
+        wholeWord,
+        maxMatches,
+      );
+      final text = resultPtr.toDartString();
+      _freeString(resultPtr);
+      final decoded = jsonDecode(text) as Map<String, dynamic>;
+      if (decoded.containsKey('error')) {
+        throw GitFfiException(decoded['error'] as String);
+      }
+      return decoded['ok'] as Map<String, dynamic>;
+    } finally {
+      malloc.free(rootPtr);
+      malloc.free(queryPtr);
+    }
+  }
+
+  /// Blames [relPath] in the repository at [path]. With [contents], blames
+  /// that text (e.g. the editor's) instead of the committed file. Each item
+  /// is a hunk: `{"start_line", "lines", "commit_id", "author", "email",
+  /// "time", "summary"}`. Throws [GitFfiException] on failure.
+  List<dynamic> blame(String path, String relPath, {String? contents}) {
+    final pathPtr = path.toNativeUtf8();
+    final relPtr = relPath.toNativeUtf8();
+    final contentsPtr = contents?.toNativeUtf8() ?? nullptr;
+    try {
+      return _consumeJsonList(_blame(pathPtr, relPtr, contentsPtr));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(relPtr);
+      if (contentsPtr != nullptr) malloc.free(contentsPtr);
     }
   }
 
@@ -465,13 +731,16 @@ class GitFfi {
   }
 
   /// Local and remote-tracking branches, as raw decoded JSON list entries.
-  /// Throws a [GitFfiException] on failure.
-  List<dynamic> branches(String path) {
+  /// Local branches are counted ahead/behind against [compareBase], or the
+  /// default branch when it's null. Throws a [GitFfiException] on failure.
+  List<dynamic> branches(String path, {String? compareBase}) {
     final pathPtr = path.toNativeUtf8();
+    final basePtr = compareBase?.toNativeUtf8() ?? nullptr;
     try {
-      return _consumeJsonList(_branches(pathPtr));
+      return _consumeJsonList(_branches(pathPtr, basePtr));
     } finally {
       malloc.free(pathPtr);
+      if (basePtr != nullptr) malloc.free(basePtr);
     }
   }
 

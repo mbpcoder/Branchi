@@ -6,10 +6,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../logs/action_log.dart';
 import '../repo/git_actions.dart';
+import '../repo/git_ffi.dart';
 import '../repo/models.dart';
 
 const String _onlyWhenCleanKey = 'branchi_watcher_only_when_clean';
 const String _notifyKey = 'branchi_watcher_notify_new_commits';
+const String _pruneKey = 'branchi_fetch_prune';
 const String _branchesKeyPrefix = 'branchi_watcher_branches_';
 
 /// A notification raised by [runWatchedPull] when an automatic pull brought
@@ -34,6 +36,8 @@ class WatcherNotification {
 ///   uncommitted changes (untracked files don't count). Global.
 /// * [notifyOnNewCommits] - report pulls that brought in commits (action
 ///   log entry + [notifications]). Global.
+/// * [pruneOnFetch] - every fetch (Fetch, Pull, auto-pull) removes remote
+///   branches that were deleted on the remote. Global, on by default.
 /// * branches to pull - per repository; the set of local branch names that
 ///   each automatic pull fast-forwards. `null` (never configured) means just
 ///   the current branch, the watcher's original behaviour.
@@ -46,6 +50,7 @@ class WatcherPreferences {
   static final ValueNotifier<bool> notifyOnNewCommits = ValueNotifier<bool>(
     true,
   );
+  static final ValueNotifier<bool> pruneOnFetch = ValueNotifier<bool>(true);
 
   /// Fires for every automatic pull that brought in new commits while
   /// [notifyOnNewCommits] is on. A host widget with a [ScaffoldMessenger]
@@ -66,6 +71,15 @@ class WatcherPreferences {
     final prefs = await SharedPreferences.getInstance();
     onlyWhenClean.value = prefs.getBool(_onlyWhenCleanKey) ?? true;
     notifyOnNewCommits.value = prefs.getBool(_notifyKey) ?? true;
+    pruneOnFetch.value = prefs.getBool(_pruneKey) ?? true;
+    GitFfi.instanceOrNull?.setPruneOnFetch(pruneOnFetch.value);
+  }
+
+  static Future<void> setPruneOnFetch(bool value) async {
+    pruneOnFetch.value = value;
+    GitFfi.instanceOrNull?.setPruneOnFetch(value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_pruneKey, value);
   }
 
   static Future<void> setOnlyWhenClean(bool value) async {

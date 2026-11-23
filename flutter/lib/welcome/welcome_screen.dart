@@ -16,7 +16,6 @@ import '../terminal/terminal_session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_top_bar.dart';
 import '../widgets/bottom_toolbar.dart';
-import '../widgets/tab_bar_row.dart';
 import '../update/update_banner.dart';
 import 'folder_update_view.dart';
 import 'welcome_form.dart';
@@ -324,7 +323,18 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   /// Attaches [path] to the currently active tab, e.g. after a repository
   /// is opened, created, or cloned from that tab's start form.
+  ///
+  /// If another tab already has [path] open, switches to that tab and
+  /// closes the start-page tab it was picked from instead of opening the
+  /// repository twice.
   void _setActiveTabRepository(String path) {
+    final existing = _tabIndexForRepository(path);
+    if (existing != -1 && existing != _activeTabIndex) {
+      final startTab = _activeTabIndex;
+      setState(() => _activeTabIndex = existing);
+      _closeTab(startTab);
+      return;
+    }
     setState(() {
       final tab = _tabs[_activeTabIndex];
       tab.path = path;
@@ -355,13 +365,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 onToggleTheme: AppTheme.toggle,
                 isPinned: _isPinned,
                 onTogglePin: _togglePin,
-              ),
-              TabBarRow(
-                tabs: _tabs,
-                activeIndex: _activeTabIndex,
-                onSelect: _selectTab,
-                onClose: _closeTab,
-                onAddTab: _addTab,
               ),
               const UpdateBanner(),
               Expanded(

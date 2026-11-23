@@ -62,14 +62,29 @@ class BranchEntry {
     required this.isHead,
     required this.isRemote,
     this.mergedInto,
+    this.lastCommitTime,
+    this.remoteCounterpart,
+    this.ahead = 0,
+    this.behind = 0,
+    this.base,
+    this.baseAhead = 0,
+    this.baseBehind = 0,
   });
 
   factory BranchEntry.fromJson(Map<String, dynamic> json) {
+    final time = json['last_commit_time'] as String?;
     return BranchEntry(
       name: json['name'] as String,
       isHead: json['is_head'] as bool,
       isRemote: json['is_remote'] as bool,
       mergedInto: json['merged_into'] as String?,
+      lastCommitTime: time == null ? null : DateTime.parse(time),
+      remoteCounterpart: json['remote_counterpart'] as String?,
+      ahead: json['ahead'] as int? ?? 0,
+      behind: json['behind'] as int? ?? 0,
+      base: json['base'] as String?,
+      baseAhead: json['base_ahead'] as int? ?? 0,
+      baseBehind: json['base_behind'] as int? ?? 0,
     );
   }
 
@@ -80,6 +95,24 @@ class BranchEntry {
   /// The default branch (e.g. `origin/main`) this branch is already fully
   /// merged into, or null when it isn't merged.
   final String? mergedInto;
+
+  /// When the branch's latest commit was made; used to sort by activity.
+  final DateTime? lastCommitTime;
+
+  /// For a local branch: the matching remote branch (its upstream, else a
+  /// same-named one, e.g. `origin/main`), or null if it's only local.
+  final String? remoteCounterpart;
+
+  /// Commits to push to / pull from [remoteCounterpart].
+  final int ahead;
+  final int behind;
+
+  /// For a local branch other than the base: the branch it's compared with
+  /// (e.g. `origin/main`) and how many commits it has that the base doesn't
+  /// ([baseAhead]) and the reverse ([baseBehind]). Null base = no counts.
+  final String? base;
+  final int baseAhead;
+  final int baseBehind;
 
   bool get isMerged => mergedInto != null;
 }

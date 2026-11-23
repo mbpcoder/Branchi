@@ -11,6 +11,8 @@ import 'column_resize_handle.dart';
 import 'commit_detail.dart';
 import 'commit_list.dart';
 import 'git_actions.dart';
+import 'git_ffi.dart';
+import 'merge.dart';
 import 'models.dart';
 import 'panel_layout_store.dart';
 import 'repo_controller.dart';
@@ -66,6 +68,9 @@ class RepositoryViewState extends State<RepositoryView> {
   List<StatusEntry> _status = [];
   bool _isStatusLoading = false;
   String? _statusError;
+
+  /// A merge stopped on conflicts, shown in Changes until finished.
+  MergeState? _mergeState;
 
   double _sidebarWidth = _defaultSidebarWidth;
   double _commitListWidth = _defaultCommitListWidth;
@@ -136,7 +141,11 @@ class RepositoryViewState extends State<RepositoryView> {
     final current = _controller.section;
     _lastSection = current;
     if (previous != current) {
-      if (previous == RepoSection.files) widget.onLanguageChanged?.call(null);
+      if (previous == RepoSection.files) {
+        widget.onLanguageChanged?.call(null);
+        // Files edited in the editor change the working tree.
+        unawaited(_loadStatus());
+      }
       if (current == RepoSection.changes) {
         _selectedCommit = null;
         unawaited(_loadStatus());
@@ -166,6 +175,32 @@ class RepositoryViewState extends State<RepositoryView> {
               author: commit.author,
               email: commit.email,
               time: commit.time.toUtc(),
+              parentIds: const [],
+            ),
+    );
+  }
+
+  /// Switches to History with the commit [id] selected, e.g. from line
+  /// blame in the editor. The other fields describe it when it's older
+  /// than the loaded history.
+  void _showCommitById(
+    String id, {
+    required String summary,
+    required String author,
+    required String email,
+    DateTime? time,
+  }) {
+    _setSection(RepoSection.history);
+    final listed = _commits.where((c) => c.id == id);
+    _selectCommit(
+      listed.isNotEmpty
+          ? listed.first
+          : CommitEntry(
+              id: id,
+              summary: summary,
+              author: author,
+              email: email,
+              time: (time ?? DateTime.now()).toUtc(),
               parentIds: const [],
             ),
     );
@@ -267,9 +302,11 @@ class RepositoryViewState extends State<RepositoryView> {
     });
     try {
       final status = await GitActions.status(widget.path);
+      final mergeState = await MergeActions.state(widget.path);
       if (!mounted) return;
       setState(() {
         _status = status;
+        _mergeState = mergeState;
         _isStatusLoading = false;
       });
       _controller.updateChangesCount(status.length);
@@ -289,6 +326,26 @@ class RepositoryViewState extends State<RepositoryView> {
     }
     // _onControllerChanged clears the selection and reloads the status.
     _setSection(RepoSection.changes);
+  }
+
+  /// Resolves a conflicted file by taking one side (`ours` / `theirs`).
+  Future<void> _resolveConflict(String file, String side) async {
+    // During a rebase git's "ours" is the new base; the user's own
+    // commit is "theirs".
+    if (_mergeState?.isRebase ?? false) {
+      side = side == 'ours' ? 'theirs' : 'ours';
+    }
+    final error = await MergeActions.resolve(widget.path, file, side);
+    if (!mounted) return;
+    if (error != null) _showError(error);
+    await _loadStatus();
+  }
+
+  Future<void> _abortMerge() async {
+    final error = await MergeActions.abort(widget.path);
+    if (!mounted) return;
+    if (error != null) _showError(error);
+    await Future.wait([_loadStatus(), _loadRepository(showSpinner: false)]);
   }
 
   Future<bool> _stage(StatusEntry entry) async {
@@ -346,7 +403,23 @@ class RepositoryViewState extends State<RepositoryView> {
     return result.isSuccess;
   }
 
+  /// Continues (or with [skip], skips a commit of) a stopped rebase.
+  Future<bool> _continueRebase(String? message, {bool skip = false}) async {
+    try {
+      final outcome = skip
+          ? await MergeActions.skipRebaseCommit(widget.path)
+          : await MergeActions.continueRebase(widget.path, message);
+      if (!mounted) return false;
+      await Future.wait([_loadStatus(), _loadRepository(showSpinner: false)]);
+      return outcome.result != 'conflicts';
+    } on GitFfiException catch (e) {
+      if (mounted) _showError(e.message);
+      return false;
+    }
+  }
+
   Future<bool> _commit(String message) async {
+    if (_mergeState?.isRebase ?? false) return _continueRebase(message);
     final result = await GitActions.commit(widget.path, message);
     if (!mounted) return false;
     if (result.isSuccess) {
@@ -445,7 +518,15 @@ class RepositoryViewState extends State<RepositoryView> {
     if (_section == RepoSection.files) {
       return CodeView(
         key: _codeViewKey,
+        onOpenCommit: (hunk) => _showCommitById(
+          hunk.commitId!,
+          summary: hunk.summary,
+          author: hunk.author,
+          email: hunk.email,
+          time: hunk.time,
+        ),
         repoPath: widget.path,
+        rebasing: _mergeState?.isRebase ?? false,
         onLanguageChanged: widget.onLanguageChanged,
       );
     }
@@ -468,6 +549,12 @@ class RepositoryViewState extends State<RepositoryView> {
         onCommitAndPush: _commitAndPush,
         onOpenFile: (entry) => _openFileInEditor(entry.path),
         onRefresh: () => unawaited(_loadStatus()),
+        mergeState: _mergeState,
+        onResolveConflict: _resolveConflict,
+        onAbortMerge: _abortMerge,
+        onSkipRebaseCommit: () async {
+          await _continueRebase(null, skip: true);
+        },
         loadDiff: (entry, {required staged}) =>
             GitActions.workingDiff(widget.path, entry.path, staged: staged),
       );
@@ -483,6 +570,7 @@ class RepositoryViewState extends State<RepositoryView> {
           watchIntervalMinutes: _controller.watcher.intervalMinutes,
           onWatchIntervalChanged: _controller.watcher.setIntervalMinutes,
           onOpenInTerminal: widget.onOpenInTerminal,
+          onMergeConflicts: () => _setSection(RepoSection.changes),
           isUpdatingCurrentBranch: _controller.isPulling,
           onUpdateCurrentBranch: () async {
             final result = await _controller.pull();
