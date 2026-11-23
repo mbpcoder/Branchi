@@ -449,6 +449,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   },
                   onClose: _closeTerminalTab,
                   onAddTab: _addTerminalTab,
+                  onHide: _toggleTerminal,
                   height: tab.terminalHeight,
                   onHeightChanged: (value) =>
                       setState(() => tab.terminalHeight = value),
@@ -458,6 +459,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   height: tab.logsHeight,
                   onHeightChanged: (value) =>
                       setState(() => tab.logsHeight = value),
+                  onHide: _toggleLogs,
                 ),
               BottomToolbar(
                 isTerminalOpen: tab.isTerminalOpen,

@@ -7,6 +7,7 @@ import '../l10n/app_calendar.dart';
 import '../l10n/app_locale.dart';
 import 'action_log.dart';
 import 'action_stats_label.dart';
+import '../shortcuts/app_shortcuts.dart';
 import '../theme/app_theme.dart';
 
 /// Minimum and maximum drag-resize height for the logs/terminal panels.
@@ -43,15 +44,52 @@ class PanelResizeHandle extends StatelessWidget {
   }
 }
 
+/// The − button that closes a bottom panel, at the end of its header.
+class PanelHideButton extends StatelessWidget {
+  const PanelHideButton({
+    super.key,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  /// The panel's shortcut, e.g. "Alt+F12".
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(end: 8),
+      child: IconButton(
+        tooltip: '${translate('hide_panel')} ($tooltip)',
+        icon: Icon(Icons.remove, size: 16, color: b.muted),
+        constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+        padding: EdgeInsets.zero,
+        style: IconButton.styleFrom(minimumSize: const Size(26, 26)),
+        onPressed: onPressed,
+      ),
+    );
+  }
+}
+
 /// The bottom logs panel: git actions run through [GitActions], newest
 /// first, grouped by day ("Today", "Yesterday", "Sep 8, 2026"). Today's
 /// recent actions show a relative time ("4 min ago"); hovering a time shows
 /// the exact one.
 class LogsPanel extends StatefulWidget {
-  const LogsPanel({super.key, required this.height, required this.onHeightChanged});
+  const LogsPanel({
+    super.key,
+    required this.height,
+    required this.onHeightChanged,
+    required this.onHide,
+  });
 
   final double height;
   final ValueChanged<double> onHeightChanged;
+
+  /// Closes the panel (the − button).
+  final VoidCallback onHide;
 
   @override
   State<LogsPanel> createState() => _LogsPanelState();
@@ -93,71 +131,97 @@ class _LogsPanelState extends State<LogsPanel> {
             color: b.bg,
             border: Border(top: b.hairline),
           ),
-          child: ListenableBuilder(
-            listenable: Listenable.merge(
-              [ActionLog.instance, AppCalendarSettings.preference],
-            ),
-            builder: (context, _) {
-              final entries = ActionLog.instance.entries;
-              if (entries.isEmpty) {
-                return Center(
-                  child: Text(
-                    translate('no_logged_actions'),
-                    style: TextStyle(color: b.muted),
-                  ),
-                );
-              }
-              final now = DateTime.now();
-              final cal = AppCalendarSettings.current;
-              // Day headers between the entries: a String is a header,
-              // an ActionLogEntry a row.
-              final items = <Object>[];
-              DateTime? day;
-              for (final entry in entries) {
-                final t = entry.timestamp;
-                final entryDay = DateTime(t.year, t.month, t.day);
-                if (entryDay != day) {
-                  day = entryDay;
-                  items.add(_dayLabel(entryDay, now, cal));
-                }
-                items.add(entry);
-              }
-              return GestureDetector(
-                onSecondaryTapUp: (details) =>
-                    _showClearMenu(context, details.globalPosition),
-                behavior: HitTestBehavior.translucent,
-                child: ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  itemCount: items.length,
-                  itemBuilder: (context, index) {
-                    final item = items[index];
-                    if (item is String) {
-                      return Padding(
-                        padding: const EdgeInsetsDirectional.fromSTEB(
-                          16, 10, 16, 4),
-                        child: Text(
-                          item.toUpperCase(),
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: b.muted,
-                            letterSpacing: 0.44,
-                          ),
+          child: Column(
+            children: [
+              SizedBox(
+                height: 32,
+                child: Row(
+                  children: [
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Text(
+                        translate('activity').toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: b.muted,
+                          letterSpacing: 0.44,
                         ),
-                      );
-                    }
-                    return _row(
-                      context,
-                      item as ActionLogEntry,
-                      now,
-                      cal,
-                    );
-                  },
+                      ),
+                    ),
+                    PanelHideButton(
+                      tooltip: AppShortcuts.label(AppShortcut.activity),
+                      onPressed: widget.onHide,
+                    ),
+                  ],
                 ),
-              );
-            },
+              ),
+              Expanded(child: _entries(context)),
+            ],
           ),
         ),
       ],
+    );
+  }
+
+  Widget _entries(BuildContext context) {
+    final b = context.branchi;
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        ActionLog.instance,
+        AppCalendarSettings.preference,
+      ]),
+      builder: (context, _) {
+        final entries = ActionLog.instance.entries;
+        if (entries.isEmpty) {
+          return Center(
+            child: Text(
+              translate('no_logged_actions'),
+              style: TextStyle(color: b.muted),
+            ),
+          );
+        }
+        final now = DateTime.now();
+        final cal = AppCalendarSettings.current;
+        // Day headers between the entries: a String is a header,
+        // an ActionLogEntry a row.
+        final items = <Object>[];
+        DateTime? day;
+        for (final entry in entries) {
+          final t = entry.timestamp;
+          final entryDay = DateTime(t.year, t.month, t.day);
+          if (entryDay != day) {
+            day = entryDay;
+            items.add(_dayLabel(entryDay, now, cal));
+          }
+          items.add(entry);
+        }
+        return GestureDetector(
+          onSecondaryTapUp: (details) =>
+              _showClearMenu(context, details.globalPosition),
+          behavior: HitTestBehavior.translucent,
+          child: ListView.builder(
+            padding: const EdgeInsets.only(bottom: 8),
+            itemCount: items.length,
+            itemBuilder: (context, index) {
+              final item = items[index];
+              if (item is String) {
+                return Padding(
+                  padding: const EdgeInsetsDirectional.fromSTEB(16, 10, 16, 4),
+                  child: Text(
+                    item.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: b.muted,
+                      letterSpacing: 0.44,
+                    ),
+                  ),
+                );
+              }
+              return _row(context, item as ActionLogEntry, now, cal);
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -207,10 +271,7 @@ class _LogsPanelState extends State<LogsPanel> {
           if (detail != null && detail.isNotEmpty)
             Padding(
               padding: const EdgeInsetsDirectional.only(start: 24, top: 2),
-              child: Text(
-                detail,
-                style: TextStyle(fontSize: 12, color: b.del),
-              ),
+              child: Text(detail, style: TextStyle(fontSize: 12, color: b.del)),
             ),
         ],
       ),
@@ -230,8 +291,9 @@ class _LogsPanelState extends State<LogsPanel> {
     final diff = now.difference(time);
     if (diff.inMinutes < 1) return translate('activity_just_now');
     if (diff.inMinutes < 60) {
-      return translate('report_ago_minutes')
-          .replaceAll('{n}', cal.digits(diff.inMinutes));
+      return translate(
+        'report_ago_minutes',
+      ).replaceAll('{n}', cal.digits(diff.inMinutes));
     }
     return cal.digits(_clock(time));
   }

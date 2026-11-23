@@ -3,8 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart';
 
 import '../l10n/app_locale.dart';
-import '../logs/logs_panel.dart' show PanelResizeHandle, kPanelMinHeight, kPanelMaxHeight;
+import '../logs/logs_panel.dart'
+    show PanelHideButton, PanelResizeHandle, kPanelMinHeight, kPanelMaxHeight;
 import '../settings/shell_preferences.dart';
+import '../shortcuts/app_shortcuts.dart';
 import 'terminal_session.dart';
 
 /// The bottom terminal panel: a row of terminal tabs plus the active
@@ -17,6 +19,7 @@ class TerminalPanel extends StatefulWidget {
     required this.onSelect,
     required this.onClose,
     required this.onAddTab,
+    required this.onHide,
     required this.height,
     required this.onHeightChanged,
   });
@@ -26,6 +29,9 @@ class TerminalPanel extends StatefulWidget {
   final ValueChanged<int> onSelect;
   final ValueChanged<int> onClose;
   final ValueChanged<ShellDefinition?> onAddTab;
+
+  /// Closes the panel (the − button); the sessions keep running.
+  final VoidCallback onHide;
   final double height;
   final ValueChanged<double> onHeightChanged;
 
@@ -67,10 +73,9 @@ class _TerminalPanelState extends State<TerminalPanel> {
     final terminal = sessions[activeIndex].terminal;
     final lines = <String>[];
     for (final segment in selection.toSegments()) {
-      lines.add(terminal.buffer.lines[segment.line].getText(
-        segment.start,
-        segment.end,
-      ));
+      lines.add(
+        terminal.buffer.lines[segment.line].getText(segment.start, segment.end),
+      );
     }
     final text = lines.join('\n');
     return text.isEmpty ? null : text;
@@ -91,8 +96,7 @@ class _TerminalPanelState extends State<TerminalPanel> {
   }
 
   Future<void> _showContextMenu(Offset globalPosition) async {
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final hasSelection = _selectedText() != null;
     final action = await showMenu<String>(
       context: context,
@@ -106,10 +110,7 @@ class _TerminalPanelState extends State<TerminalPanel> {
           enabled: hasSelection,
           child: Text(translate('copy')),
         ),
-        PopupMenuItem(
-          value: 'paste',
-          child: Text(translate('paste')),
-        ),
+        PopupMenuItem(value: 'paste', child: Text(translate('paste'))),
       ],
     );
     switch (action) {
@@ -165,85 +166,99 @@ class _TerminalPanelState extends State<TerminalPanel> {
                 height: 32,
                 child: Row(
                   children: [
-                    // Tabs take only the room they need, so the + button
-                    // follows the last tab; they scroll once they fill
-                    // the row.
-                    Flexible(
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        scrollDirection: Axis.horizontal,
-                        itemCount: sessions.length,
-                        itemBuilder: (context, index) {
-                          final session = sessions[index];
-                          final isActive = index == activeIndex;
-                          return InkWell(
-                            onTap: () => onSelect(index),
-                            child: Container(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 12),
-                              decoration: BoxDecoration(
-                                color: isActive
-                                    ? colorScheme.surfaceContainerHighest
-                                    : Colors.transparent,
-                                border: Border(
-                                  right: BorderSide(
-                                      color: colorScheme.outlineVariant),
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    session.title,
-                                    style: TextStyle(
-                                      fontWeight: isActive
-                                          ? FontWeight.bold
-                                          : FontWeight.normal,
+                    Expanded(
+                      child: Row(
+                        children: [
+                          // Tabs take only the room they need, so the + button
+                          // follows the last tab; they scroll once they fill
+                          // the row.
+                          Flexible(
+                            child: ListView.builder(
+                              shrinkWrap: true,
+                              scrollDirection: Axis.horizontal,
+                              itemCount: sessions.length,
+                              itemBuilder: (context, index) {
+                                final session = sessions[index];
+                                final isActive = index == activeIndex;
+                                return InkWell(
+                                  onTap: () => onSelect(index),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isActive
+                                          ? colorScheme.surfaceContainerHighest
+                                          : Colors.transparent,
+                                      border: Border(
+                                        right: BorderSide(
+                                          color: colorScheme.outlineVariant,
+                                        ),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          session.title,
+                                          style: TextStyle(
+                                            fontWeight: isActive
+                                                ? FontWeight.bold
+                                                : FontWeight.normal,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        InkWell(
+                                          onTap: () => onClose(index),
+                                          child: const Icon(
+                                            Icons.close,
+                                            size: 16,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                  const SizedBox(width: 6),
-                                  InkWell(
-                                    onTap: () => onClose(index),
-                                    child: const Icon(Icons.close, size: 16),
-                                  ),
-                                ],
-                              ),
+                                );
+                              },
                             ),
-                          );
-                        },
-                      ),
-                    ),
-                    AnimatedBuilder(
-                      animation: Listenable.merge(
-                        [
-                          ShellPreferences.detected,
-                          ShellPreferences.custom,
-                          ShellPreferences.defaultExecutable,
+                          ),
+                          AnimatedBuilder(
+                            animation: Listenable.merge([
+                              ShellPreferences.detected,
+                              ShellPreferences.custom,
+                              ShellPreferences.defaultExecutable,
+                            ]),
+                            builder: (context, _) {
+                              final shells = ShellPreferences.all;
+                              if (shells.length <= 1) {
+                                return IconButton(
+                                  tooltip: translate('new_tab'),
+                                  icon: const Icon(Icons.add),
+                                  onPressed: () => onAddTab(
+                                    ShellPreferences.resolvedDefault,
+                                  ),
+                                );
+                              }
+                              return PopupMenuButton<ShellDefinition>(
+                                tooltip: translate('new_tab'),
+                                icon: const Icon(Icons.add),
+                                onSelected: onAddTab,
+                                itemBuilder: (context) => [
+                                  for (final shell in shells)
+                                    PopupMenuItem(
+                                      value: shell,
+                                      child: Text(shell.name),
+                                    ),
+                                ],
+                              );
+                            },
+                          ),
                         ],
                       ),
-                      builder: (context, _) {
-                        final shells = ShellPreferences.all;
-                        if (shells.length <= 1) {
-                          return IconButton(
-                            tooltip: translate('new_tab'),
-                            icon: const Icon(Icons.add),
-                            onPressed: () =>
-                                onAddTab(ShellPreferences.resolvedDefault),
-                          );
-                        }
-                        return PopupMenuButton<ShellDefinition>(
-                          tooltip: translate('new_tab'),
-                          icon: const Icon(Icons.add),
-                          onSelected: onAddTab,
-                          itemBuilder: (context) => [
-                            for (final shell in shells)
-                              PopupMenuItem(
-                                value: shell,
-                                child: Text(shell.name),
-                              ),
-                          ],
-                        );
-                      },
+                    ),
+                    PanelHideButton(
+                      tooltip: AppShortcuts.label(AppShortcut.terminal),
+                      onPressed: widget.onHide,
                     ),
                   ],
                 ),
