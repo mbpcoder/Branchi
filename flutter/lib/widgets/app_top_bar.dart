@@ -4,6 +4,7 @@ import '../l10n/app_locale.dart';
 import '../models/repo_tab.dart';
 import '../repo/git_actions.dart';
 import '../repo/repo_controller.dart';
+import '../shortcuts/app_shortcuts.dart';
 import '../theme/app_theme.dart';
 import 'auto_pull_button.dart';
 import 'tab_bar_row.dart';
@@ -242,9 +243,17 @@ class _SectionTabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final b = context.branchi;
-    Widget segment(RepoSection section, String label, {int? count}) {
+    Widget segment(
+      RepoSection section,
+      String label,
+      AppShortcut shortcut, {
+      int? count,
+    }) {
       final selected = controller.section == section;
-      return GestureDetector(
+      return Tooltip(
+        message: AppShortcuts.label(shortcut),
+        waitDuration: const Duration(milliseconds: 500),
+        child: GestureDetector(
         onTap: () => controller.section = section,
         child: MouseRegion(
           cursor: SystemMouseCursors.click,
@@ -273,6 +282,7 @@ class _SectionTabs extends StatelessWidget {
             ),
           ),
         ),
+        ),
       );
     }
 
@@ -285,17 +295,19 @@ class _SectionTabs extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          segment(RepoSection.history, translate('history')),
+          segment(RepoSection.history, translate('history'),
+              AppShortcut.history),
           const SizedBox(width: 4),
           segment(
             RepoSection.changes,
             translate('changes'),
+            AppShortcut.changes,
             count: controller.changesCount,
           ),
           const SizedBox(width: 4),
-          segment(RepoSection.files, translate('files')),
+          segment(RepoSection.files, translate('files'), AppShortcut.files),
           const SizedBox(width: 4),
-          segment(RepoSection.report, translate('report')),
+          segment(RepoSection.report, translate('report'), AppShortcut.report),
         ],
       ),
     );

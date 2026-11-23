@@ -10,6 +10,7 @@ import '../theme/app_theme.dart';
 import '../widgets/form_row.dart';
 import 'branch_watcher_section.dart';
 import 'open_repo_lookup.dart';
+import '../shortcuts/app_shortcuts.dart';
 import 'settings_route.dart';
 import 'settings_widgets.dart';
 import 'shell_preferences.dart';
@@ -23,6 +24,7 @@ enum SettingsSection {
   terminal('terminal', 'terminal'),
   branchWatcher(kSettingsSectionBranchWatcher, 'branch_watcher'),
   updates('updates', 'updates'),
+  shortcuts('shortcuts', 'settings_shortcuts'),
   logs('logs', 'logs');
 
   const SettingsSection(this.id, this.labelKey);
@@ -277,6 +279,7 @@ class _SettingsPageState extends State<SettingsPage> {
       SettingsSection.terminal => _terminal(),
       SettingsSection.branchWatcher => BranchWatcherSection(controller: _repo),
       SettingsSection.updates => const UpdateSettingsSection(),
+      SettingsSection.shortcuts => const _ShortcutsSection(),
       SettingsSection.logs => const _LogsSection(),
     };
   }
@@ -821,6 +824,95 @@ class _DefaultShellDropdown extends StatelessWidget {
 
 /// Recent git actions (the same log the logs panel shows) and a clear
 /// button.
+/// A read-only list of the app's keyboard shortcuts ([AppShortcuts]).
+class _ShortcutsSection extends StatelessWidget {
+  const _ShortcutsSection();
+
+  @override
+  Widget build(BuildContext context) {
+    Widget group(String labelKey, List<(String, AppShortcut)> rows) =>
+        SettingsGroup(
+          label: translate(labelKey),
+          child: BorderedList(
+            children: [
+              for (final (label, shortcut) in rows)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(child: Text(label)),
+                      _Keys(keys: AppShortcuts.keys(shortcut)),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SettingsSectionTitle(
+          title: translate('settings_shortcuts'),
+          subtitle: translate('settings_shortcuts_description'),
+        ),
+        const SizedBox(height: 40),
+        group('shortcuts_panels', [
+          (translate('shortcut_terminal'), AppShortcut.terminal),
+          (translate('shortcut_activity'), AppShortcut.activity),
+        ]),
+        const SizedBox(height: 32),
+        group('shortcuts_sections', [
+          (translate('history'), AppShortcut.history),
+          (translate('changes'), AppShortcut.changes),
+          (translate('files'), AppShortcut.files),
+          (translate('report'), AppShortcut.report),
+        ]),
+        const SizedBox(height: 32),
+        group('shortcuts_tabs', [
+          (translate('shortcut_next_tab'), AppShortcut.nextTab),
+          (translate('shortcut_previous_tab'), AppShortcut.previousTab),
+          (translate('shortcut_go_to_tab'), AppShortcut.goToTab),
+        ]),
+      ],
+    );
+  }
+}
+
+/// Key caps: [Ctrl] [Shift] [Tab]. Always left to right, also in RTL.
+class _Keys extends StatelessWidget {
+  const _Keys({required this.keys});
+
+  final List<String> keys;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final key in keys)
+            Container(
+              margin: const EdgeInsetsDirectional.only(start: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: b.hover,
+                border: Border.all(color: b.off),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(key, style: b.mono(fontSize: 11, color: b.fg)),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _LogsSection extends StatelessWidget {
   const _LogsSection();
 

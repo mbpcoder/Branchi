@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 
@@ -8,9 +9,11 @@ import '../l10n/app_locale.dart';
 import '../logs/logs_panel.dart';
 import '../models/repo_tab.dart';
 import '../repo/recent_repositories_store.dart';
+import '../repo/repo_controller.dart';
 import '../repo/repository_view.dart';
 import '../settings/settings_route.dart';
 import '../settings/shell_preferences.dart';
+import '../shortcuts/app_shortcuts.dart';
 import '../terminal/terminal_panel.dart';
 import '../terminal/terminal_session.dart';
 import '../theme/app_theme.dart';
@@ -40,7 +43,49 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_onKey);
     _restoreState();
+  }
+
+  /// Runs the app-wide shortcuts ([AppShortcuts]). Handled before the
+  /// focus system, so they also work while the terminal has focus (it
+  /// would otherwise send the keys to the shell).
+  bool _onKey(KeyEvent event) {
+    if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? true)) {
+      return false;
+    }
+    final match = AppShortcuts.match(event);
+    if (match == null) return false;
+    final controller = _tabs[_activeTabIndex].controller;
+    void showSection(RepoSection section) {
+      // No sections on a start page; the keys still don't reach the
+      // focused widget, so they behave the same everywhere.
+      controller?.section = section;
+    }
+
+    switch (match.shortcut) {
+      case AppShortcut.terminal:
+        _toggleTerminal();
+      case AppShortcut.activity:
+        _toggleLogs();
+      case AppShortcut.history:
+        showSection(RepoSection.history);
+      case AppShortcut.changes:
+        showSection(RepoSection.changes);
+      case AppShortcut.files:
+        showSection(RepoSection.files);
+      case AppShortcut.report:
+        showSection(RepoSection.report);
+      case AppShortcut.nextTab:
+        _selectTab((_activeTabIndex + 1) % _tabs.length);
+      case AppShortcut.previousTab:
+        _selectTab((_activeTabIndex - 1 + _tabs.length) % _tabs.length);
+      case AppShortcut.goToTab:
+        final index = match.tabIndex!;
+        if (index >= _tabs.length) return false;
+        _selectTab(index);
+    }
+    return true;
   }
 
   /// Reopens the tabs and each tab's terminal tabs that were open the last
@@ -197,6 +242,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKey);
     for (final tab in _tabs) {
       for (final session in tab.terminalSessions) {
         session.dispose();
@@ -403,6 +449,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   },
                   onClose: _closeTerminalTab,
                   onAddTab: _addTerminalTab,
+                  onHide: _toggleTerminal,
                   height: tab.terminalHeight,
                   onHeightChanged: (value) =>
                       setState(() => tab.terminalHeight = value),
@@ -412,6 +459,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   height: tab.logsHeight,
                   onHeightChanged: (value) =>
                       setState(() => tab.logsHeight = value),
+                  onHide: _toggleLogs,
                 ),
               BottomToolbar(
                 isTerminalOpen: tab.isTerminalOpen,

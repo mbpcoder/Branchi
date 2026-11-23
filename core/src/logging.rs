@@ -22,10 +22,24 @@ fn logs_dir() -> std::path::PathBuf {
         .join("logs")
 }
 
+/// Stops `anyhow` from capturing a backtrace for every error when the
+/// user's environment has `RUST_BACKTRACE` set. Inside the Flutter app on
+/// Linux, unwinding mixes libgcc with the libunwind that
+/// `libflutter_linux_gtk.so` exports, and capturing segfaults, so any git
+/// error (e.g. "no upstream") crashed the app. An explicit
+/// `RUST_LIB_BACKTRACE` is respected; panics keep their backtraces.
+fn disable_error_backtraces() {
+    if std::env::var_os("RUST_LIB_BACKTRACE").is_none() {
+        // Runs once, at library start-up, before any error is created.
+        std::env::set_var("RUST_LIB_BACKTRACE", "0");
+    }
+}
+
 /// Initializes the rotating file logger. Safe to call more than once;
 /// only the first call takes effect.
 pub fn init() {
     INIT.call_once(|| {
+        disable_error_backtraces();
         let dir = logs_dir();
         if let Err(err) = std::fs::create_dir_all(&dir) {
             eprintln!(

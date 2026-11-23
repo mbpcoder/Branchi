@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_locale.dart';
 import '../models/repo_tab.dart';
+import '../shortcuts/app_shortcuts.dart';
 import '../theme/app_theme.dart';
 
 /// Strip of open tabs with an "add tab" button right after the last tab.
@@ -54,6 +55,7 @@ class TabBarRow extends StatelessWidget {
           }
           return _Tab(
             title: tabs[index].title,
+            shortcut: AppShortcuts.tabLabel(index),
             active: index == activeIndex,
             onTap: () => onSelect(index),
             onClose: () => onClose(index),
@@ -77,12 +79,16 @@ class TabBarRow extends StatelessWidget {
 class _Tab extends StatefulWidget {
   const _Tab({
     required this.title,
+    this.shortcut,
     required this.active,
     required this.onTap,
     required this.onClose,
   });
 
   final String title;
+
+  /// "Alt+3", shown in the tab's tooltip.
+  final String? shortcut;
   final bool active;
   final VoidCallback onTap;
   final VoidCallback onClose;
@@ -115,16 +121,22 @@ class _TabState extends State<_Tab> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 200),
-                child: Text(
-                  widget.title,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: widget.active ? b.fg : b.muted,
-                    fontWeight:
-                        widget.active ? FontWeight.w500 : FontWeight.w400,
+              Tooltip(
+                message: widget.shortcut == null
+                    ? widget.title
+                    : '${widget.title} (${widget.shortcut})',
+                waitDuration: const Duration(milliseconds: 500),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 200),
+                  child: Text(
+                    widget.title,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: widget.active ? b.fg : b.muted,
+                      fontWeight:
+                          widget.active ? FontWeight.w500 : FontWeight.w400,
+                    ),
                   ),
                 ),
               ),

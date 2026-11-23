@@ -197,8 +197,9 @@ class GitActions {
         : GitActionResult.failure(error);
   }
 
-  /// Creates local branch [name], tracking remote branch [from] (e.g.
-  /// `origin/feature`) if given, or starting from HEAD otherwise.
+  /// Creates local branch [name] starting at [from]: a remote branch (e.g.
+  /// `origin/feature`, which it then tracks) or a local one; at HEAD when
+  /// [from] is null.
   static Future<GitActionResult> createBranch(
     String path,
     String name, {
@@ -219,7 +220,8 @@ class GitActions {
         : GitActionResult.failure(error);
   }
 
-  /// Deletes branch [name] ([isRemote] selects a remote-tracking branch).
+  /// Deletes branch [name]. With [isRemote] it's a remote branch (e.g.
+  /// `origin/feature`), deleted on the server for everyone.
   static Future<GitActionResult> deleteBranch(
     String path,
     String name, {
@@ -239,6 +241,25 @@ class GitActions {
     return error == null
         ? const GitActionResult.success()
         : GitActionResult.failure(error);
+  }
+
+  /// How many commits deleting local branch [name] would lose, and the
+  /// branch they were compared with ([base], or the default branch).
+  /// Null when it can't be worked out.
+  static Future<({int commits, String? base})?> unmergedCommits(
+    String path,
+    String name, {
+    String? base,
+  }) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) return null;
+    try {
+      final json =
+          await Isolate.run(() => ffi.unmergedCommits(path, name, base));
+      return (commits: json['commits'] as int, base: json['base'] as String?);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Updates branch [name] from its remote ([isRemote] selects a

@@ -403,6 +403,9 @@ class GitFfi {
           'branchi_resolve_conflict',
         ),
         _rebase = lib.lookupFunction<_Str2, _Str2>('branchi_rebase'),
+        _unmergedCommits = lib.lookupFunction<_Str3, _Str3>(
+          'branchi_unmerged_commits',
+        ),
         _continueRebase = lib.lookupFunction<_Str2, _Str2>(
           'branchi_continue_rebase',
         ),
@@ -484,6 +487,7 @@ class GitFfi {
   final _Str1 _mergeState;
   final _Str1 _abortMerge;
   final _Str3 _resolveConflict;
+  final _Str3 _unmergedCommits;
   final _Str2 _rebase;
   final _Str2 _continueRebase;
   final _Str1 _skipRebase;
@@ -491,6 +495,16 @@ class GitFfi {
   /// Rebases the current branch onto [onto]; returns the decoded outcome.
   Map<String, dynamic> rebase(String path, String onto) =>
       _withStrings([path, onto], (p) => _consumeJsonMap(_rebase(p[0], p[1])));
+
+  /// What deleting local branch [name] would lose: `{"commits": n,
+  /// "base": "origin/master"}`, compared with [base] (null: the default
+  /// branch).
+  Map<String, dynamic> unmergedCommits(String path, String name, String? base) =>
+      _withStrings([path, name, ?base], (p) {
+        return _consumeJsonMap(
+          _unmergedCommits(p[0], p[1], p.length > 2 ? p[2] : nullptr),
+        );
+      });
 
   /// Continues a stopped rebase; [message] null keeps the commit's own.
   Map<String, dynamic> continueRebase(String path, String? message) =>

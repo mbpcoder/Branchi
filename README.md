@@ -1,7 +1,7 @@
 # Branchi — a free, open-source git client for Windows, macOS and Linux
 
 <p align="center">
-  <img src="docs/branchi-demo.gif" width="820" alt="Branchi git client tour: update all repositories in a folder, activity reports, history, changes, editor and settings" />
+  <img src="docs/branchi-demo.gif" width="820" alt="Branchi git client tour: update all repositories in a folder, activity reports, history with branch folders, the branch menu, activity log, changes, editor, terminal and keyboard shortcuts" />
 </p>
 
 **Branchi** is a free and open-source (MIT) desktop git client for Windows, macOS and Linux with a **Rust** core
@@ -39,6 +39,10 @@ That is what Branchi is being built for.
 ## Features at a glance
 
 - History with branches, commit search and file-by-file diffs
+- Branches grouped into folders (`feature/`, `hotfix/`, …) and a separate
+  Remote section with each remote (`origin`, `upstream`, …) on its own
+- Merge, rebase, create and delete branches from a branch's right-click
+  menu; deleting a branch with unmerged commits asks a second time
 - Stage, unstage, revert and commit — or commit and push in one step
 - Fetch, pull (fast-forward) and push, plus remote management
 - Auto-pull branch watcher that keeps the current branch up to date
@@ -48,6 +52,8 @@ That is what Branchi is being built for.
 - Custom date ranges, Gregorian or Jalali calendar
 - Built-in file browser and code editor
 - Built-in terminal with multiple terminal tabs
+- Activity log of every git action, grouped by day
+- Keyboard shortcuts for sections, panels and tabs, listed in Settings
 - Light and dark themes, accent colors, English, Persian and Arabic
 - No separate Git install needed for everyday work — the git engine is built in
 
@@ -70,7 +76,14 @@ That is what Branchi is being built for.
   <img src="docs/screenshots/editor.png" width="400" alt="Branchi file editor" />
 </p>
 <p>
+  <img src="docs/screenshots/branch-menu.png" width="400" alt="Branch menu: merge, rebase, new branch, push and delete" />
+  <img src="docs/screenshots/activity.png" width="400" alt="Activity log of git actions, grouped by day" />
+</p>
+<p>
+  <img src="docs/screenshots/settings-shortcuts.png" width="400" alt="Keyboard shortcuts in Settings" />
   <img src="docs/screenshots/settings.png" width="400" alt="Branchi branch watcher settings" />
+</p>
+<p>
   <img src="docs/screenshots/welcome.png" width="400" alt="Branchi start page" />
 </p>
 
@@ -113,9 +126,23 @@ commits, and open any commit to see its diff file by file. The **Changes**
 view stages, unstages and reverts files and commits, or commits and pushes
 in one step. The **Files** view is a file tree with a built-in code editor.
 
+### Branches
+Local branches are grouped into folders by their prefix (`feature/`,
+`hotfix/`, `release/`, …), and a separate **Remote** section lists every
+remote (`origin`, `upstream`, …) with its own branches, PhpStorm style. Each
+local branch shows how far it is ahead of or behind the base branch (`main`
+by default, or any branch you pick). Right-click a branch to check it out,
+update it, merge it into the current branch, rebase onto it, merge the base
+branch into it, start a new branch from it, push it or delete it. Deleting a
+remote branch deletes it on the server; deleting a local branch with commits
+that aren't in the base branch asks a second time and says how many commits
+would be lost.
+
 ### Pull, push and auto-pull
 Fetch, pull and push from the top bar. Pulls are fast-forward only, so your
-branch is never rewritten behind your back. The **branch watcher** can pull
+branch is never rewritten behind your back. Uncommitted changes are kept;
+if an incoming change would overwrite one, the pull stops and changes
+nothing. The **branch watcher** can pull
 the current branch on a schedule, only when the working tree is clean, and
 notify you when new commits arrive.
 
@@ -148,6 +175,21 @@ uses each author's own local time, taken from their commits.
 ### Built-in terminal
 Each repository tab has its own terminal panel with multiple terminal tabs,
 opened in the repository folder. Choose which shell to use in Settings.
+
+### Activity and keyboard shortcuts
+The **Activity** panel lists every git action Branchi ran, grouped by day,
+with what it changed and why anything failed. Keyboard shortcuts (on macOS,
+⌘ instead of Ctrl for the sections and ⌥ for Alt):
+
+| Action | Keys |
+| --- | --- |
+| History / Changes / Files / Report | Ctrl+1 / Ctrl+2 / Ctrl+3 / Ctrl+4 |
+| Show or hide the terminal | Alt+F12 |
+| Show or hide activity | Alt+F9 |
+| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab |
+| Go to tab 1–9 | Alt+1 … Alt+9 |
+
+The list is also in **Settings → Keyboard shortcuts**.
 
 ### Languages, RTL and calendars
 English, Persian and Arabic, with a full right-to-left layout. Dates follow
