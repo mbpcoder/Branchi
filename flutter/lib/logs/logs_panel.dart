@@ -1,8 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
+import '../l10n/app_calendar.dart';
 
 import '../l10n/app_locale.dart';
 import 'action_log.dart';
 import 'action_stats_label.dart';
+import '../theme/app_theme.dart';
 
 /// Minimum and maximum drag-resize height for the logs/terminal panels.
 const double kPanelMinHeight = 80;
@@ -38,77 +43,113 @@ class PanelResizeHandle extends StatelessWidget {
   }
 }
 
-/// The bottom logs panel: a timestamped list of git actions run through
-/// [GitActions], newest first.
-class LogsPanel extends StatelessWidget {
+/// The bottom logs panel: git actions run through [GitActions], newest
+/// first, grouped by day ("Today", "Yesterday", "Sep 8, 2026"). Today's
+/// recent actions show a relative time ("4 min ago"); hovering a time shows
+/// the exact one.
+class LogsPanel extends StatefulWidget {
   const LogsPanel({super.key, required this.height, required this.onHeightChanged});
 
   final double height;
   final ValueChanged<double> onHeightChanged;
 
   @override
+  State<LogsPanel> createState() => _LogsPanelState();
+}
+
+class _LogsPanelState extends State<LogsPanel> {
+  /// Keeps "4 min ago" current.
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => setState(() {}),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final b = context.branchi;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         PanelResizeHandle(
-          onDrag: (delta) => onHeightChanged(
-            (height + delta).clamp(kPanelMinHeight, kPanelMaxHeight),
+          onDrag: (delta) => widget.onHeightChanged(
+            (widget.height + delta).clamp(kPanelMinHeight, kPanelMaxHeight),
           ),
         ),
         Container(
-          height: height,
+          height: widget.height,
           decoration: BoxDecoration(
-            color: colorScheme.surface,
-            border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
+            color: b.bg,
+            border: Border(top: b.hairline),
           ),
-          child: AnimatedBuilder(
-            animation: ActionLog.instance,
+          child: ListenableBuilder(
+            listenable: Listenable.merge(
+              [ActionLog.instance, AppCalendarSettings.preference],
+            ),
             builder: (context, _) {
               final entries = ActionLog.instance.entries;
               if (entries.isEmpty) {
                 return Center(
                   child: Text(
                     translate('no_logged_actions'),
-                    style: TextStyle(color: colorScheme.onSurfaceVariant),
+                    style: TextStyle(color: b.muted),
                   ),
                 );
+              }
+              final now = DateTime.now();
+              final cal = AppCalendarSettings.current;
+              // Day headers between the entries: a String is a header,
+              // an ActionLogEntry a row.
+              final items = <Object>[];
+              DateTime? day;
+              for (final entry in entries) {
+                final t = entry.timestamp;
+                final entryDay = DateTime(t.year, t.month, t.day);
+                if (entryDay != day) {
+                  day = entryDay;
+                  items.add(_dayLabel(entryDay, now, cal));
+                }
+                items.add(entry);
               }
               return GestureDetector(
                 onSecondaryTapUp: (details) =>
                     _showClearMenu(context, details.globalPosition),
                 behavior: HitTestBehavior.translucent,
                 child: ListView.builder(
-                  itemCount: entries.length,
+                  padding: const EdgeInsets.only(bottom: 8),
+                  itemCount: items.length,
                   itemBuilder: (context, index) {
-                    final entry = entries[index];
-                    return ListTile(
-                      dense: true,
-                      leading: Icon(
-                        entry.success
-                            ? Icons.check_circle_outline
-                            : Icons.error_outline,
-                        size: 16,
-                        color:
-                            entry.success ? colorScheme.primary : colorScheme.error,
-                      ),
-                      title: Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              entry.action,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                    final item = items[index];
+                    if (item is String) {
+                      return Padding(
+                        padding: const EdgeInsetsDirectional.fromSTEB(
+                          16, 10, 16, 4),
+                        child: Text(
+                          item.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: b.muted,
+                            letterSpacing: 0.44,
                           ),
-                          if (entry.stats != null) ...[
-                            const SizedBox(width: 10),
-                            ActionStatsLabel(stats: entry.stats!),
-                          ],
-                        ],
-                      ),
-                      subtitle: entry.success ? null : Text(entry.detail ?? ''),
-                      trailing: Text(_formatTimestamp(entry.timestamp)),
+                        ),
+                      );
+                    }
+                    return _row(
+                      context,
+                      item as ActionLogEntry,
+                      now,
+                      cal,
                     );
                   },
                 ),
@@ -118,6 +159,87 @@ class LogsPanel extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  Widget _row(
+    BuildContext context,
+    ActionLogEntry entry,
+    DateTime now,
+    AppCalendar cal,
+  ) {
+    final b = context.branchi;
+    final detail = entry.success ? null : entry.detail;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                entry.success ? Icons.check : Icons.close,
+                size: 14,
+                color: entry.success ? b.add : b.del,
+              ),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  entry.action,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13, color: b.fg),
+                ),
+              ),
+              if (entry.stats != null) ...[
+                const SizedBox(width: 10),
+                ActionStatsLabel(stats: entry.stats!),
+              ],
+              const SizedBox(width: 8),
+              Tooltip(
+                message: cal.digits(_clock(entry.timestamp, seconds: true)),
+                child: Text(
+                  '· ${_time(entry.timestamp, now, cal)}',
+                  style: TextStyle(fontSize: 12, color: b.muted),
+                ),
+              ),
+            ],
+          ),
+          if (detail != null && detail.isNotEmpty)
+            Padding(
+              padding: const EdgeInsetsDirectional.only(start: 24, top: 2),
+              child: Text(
+                detail,
+                style: TextStyle(fontSize: 12, color: b.del),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  static String _dayLabel(DateTime day, DateTime now, AppCalendar cal) {
+    final today = DateTime(now.year, now.month, now.day);
+    final daysAgo = today.difference(day).inDays;
+    if (daysAgo == 0) return translate('activity_today');
+    if (daysAgo == 1) return translate('activity_yesterday');
+    return cal.formatDate(day);
+  }
+
+  /// "just now" / "4 min ago" within the last hour, else "14:32".
+  static String _time(DateTime time, DateTime now, AppCalendar cal) {
+    final diff = now.difference(time);
+    if (diff.inMinutes < 1) return translate('activity_just_now');
+    if (diff.inMinutes < 60) {
+      return translate('report_ago_minutes')
+          .replaceAll('{n}', cal.digits(diff.inMinutes));
+    }
+    return cal.digits(_clock(time));
+  }
+
+  static String _clock(DateTime t, {bool seconds = false}) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    final hm = '${two(t.hour)}:${two(t.minute)}';
+    return seconds ? '$hm:${two(t.second)}' : hm;
   }
 
   Future<void> _showClearMenu(BuildContext context, Offset position) async {
@@ -136,11 +258,5 @@ class LogsPanel extends StatelessWidget {
     if (selection == 'clear') {
       ActionLog.instance.clear();
     }
-  }
-
-  String _formatTimestamp(DateTime timestamp) {
-    String twoDigits(int value) => value.toString().padLeft(2, '0');
-    return '${twoDigits(timestamp.hour)}:${twoDigits(timestamp.minute)}:'
-        '${twoDigits(timestamp.second)}';
   }
 }

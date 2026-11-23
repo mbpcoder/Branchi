@@ -9,9 +9,11 @@ import '../l10n/app_locale.dart';
 import '../logs/logs_panel.dart';
 import '../models/repo_tab.dart';
 import '../repo/recent_repositories_store.dart';
+import '../repo/repo_controller.dart';
 import '../repo/repository_view.dart';
 import '../settings/settings_route.dart';
 import '../settings/shell_preferences.dart';
+import '../shortcuts/app_shortcuts.dart';
 import '../terminal/terminal_panel.dart';
 import '../terminal/terminal_session.dart';
 import '../theme/app_theme.dart';
@@ -45,22 +47,44 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     _restoreState();
   }
 
-  /// Alt+F12 shows or hides the terminal. Handled before the focus system,
-  /// so it also works while the terminal itself has focus (it would
-  /// otherwise send the keys to the shell).
+  /// Runs the app-wide shortcuts ([AppShortcuts]). Handled before the
+  /// focus system, so they also work while the terminal has focus (it
+  /// would otherwise send the keys to the shell).
   bool _onKey(KeyEvent event) {
-    final keyboard = HardwareKeyboard.instance;
-    if (event is! KeyDownEvent ||
-        event.logicalKey != LogicalKeyboardKey.f12 ||
-        !keyboard.isAltPressed ||
-        keyboard.isControlPressed ||
-        keyboard.isShiftPressed ||
-        keyboard.isMetaPressed ||
-        !mounted ||
-        !(ModalRoute.of(context)?.isCurrent ?? true)) {
+    if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? true)) {
       return false;
     }
-    _toggleTerminal();
+    final match = AppShortcuts.match(event);
+    if (match == null) return false;
+    final controller = _tabs[_activeTabIndex].controller;
+    void showSection(RepoSection section) {
+      // No sections on a start page; the keys still don't reach the
+      // focused widget, so they behave the same everywhere.
+      controller?.section = section;
+    }
+
+    switch (match.shortcut) {
+      case AppShortcut.terminal:
+        _toggleTerminal();
+      case AppShortcut.activity:
+        _toggleLogs();
+      case AppShortcut.history:
+        showSection(RepoSection.history);
+      case AppShortcut.changes:
+        showSection(RepoSection.changes);
+      case AppShortcut.files:
+        showSection(RepoSection.files);
+      case AppShortcut.report:
+        showSection(RepoSection.report);
+      case AppShortcut.nextTab:
+        _selectTab((_activeTabIndex + 1) % _tabs.length);
+      case AppShortcut.previousTab:
+        _selectTab((_activeTabIndex - 1 + _tabs.length) % _tabs.length);
+      case AppShortcut.goToTab:
+        final index = match.tabIndex!;
+        if (index >= _tabs.length) return false;
+        _selectTab(index);
+    }
     return true;
   }
 

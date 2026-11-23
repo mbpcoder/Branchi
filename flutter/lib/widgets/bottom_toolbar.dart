@@ -1,9 +1,9 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../l10n/app_locale.dart';
 import '../logs/action_log.dart';
 import '../logs/action_stats_label.dart';
+import '../shortcuts/app_shortcuts.dart';
 import '../theme/app_theme.dart';
 
 /// The 32px footer: the most recent git action (status dot, action, time)
@@ -111,15 +111,14 @@ class BottomToolbar extends StatelessWidget {
             ],
             _FooterToggle(
               label: translate('activity'),
+              tooltip: AppShortcuts.label(AppShortcut.activity),
               selected: isLogsOpen,
               onTap: onToggleLogs,
             ),
             const SizedBox(width: 8),
             _FooterToggle(
               label: translate('terminal'),
-              tooltip: defaultTargetPlatform == TargetPlatform.macOS
-                  ? '⌥F12'
-                  : 'Alt+F12',
+              tooltip: AppShortcuts.label(AppShortcut.terminal),
               selected: isTerminalOpen,
               onTap: onToggleTerminal,
             ),
