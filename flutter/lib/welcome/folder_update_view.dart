@@ -321,8 +321,7 @@ class _FilterBar extends StatelessWidget {
     final b = context.branchi;
     final statuses = [
       for (final status in _statusLabelKeys.keys)
-        if (controller.countOf(status) > 0 || selected.contains(status))
-          status,
+        if (controller.countOf(status) > 0 || selected.contains(status)) status,
     ];
     return Wrap(
       spacing: 8,
@@ -340,8 +339,10 @@ class _FilterBar extends StatelessWidget {
               isDense: true,
               hintText: translate('folder_update_search_hint'),
               prefixIcon: const Icon(Icons.search, size: 16),
-              prefixIconConstraints:
-                  const BoxConstraints(minWidth: 32, minHeight: 32),
+              prefixIconConstraints: const BoxConstraints(
+                minWidth: 32,
+                minHeight: 32,
+              ),
               contentPadding: const EdgeInsets.symmetric(vertical: 8),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
@@ -421,7 +422,7 @@ class _RepoTable extends StatelessWidget {
                     style: headerStyle,
                   ),
                 ),
-                const SizedBox(width: 80),
+                const SizedBox(width: 8 + _actionWidth),
               ],
             ),
           ),
@@ -466,27 +467,38 @@ class _RepoTable extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  if (isRepositoryOpen(repo.path))
-                    // Already open in a tab: the button switches to it.
-                    FilledButton.tonalIcon(
-                      onPressed: () => onOpenRepository(repo.path),
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(0, 30),
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                      ),
-                      icon: const Icon(Icons.tab, size: 14),
-                      label: Text(translate('folder_update_go_to_tab')),
-                    )
-                  else
-                    OutlinedButton.icon(
-                      onPressed: () => onOpenRepository(repo.path),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 30),
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                      ),
-                      icon: const Icon(Icons.open_in_new, size: 14),
-                      label: Text(translate('folder_update_open')),
+                  // Fixed width, so "Open" and the wider "Go to tab" keep
+                  // the columns lined up.
+                  SizedBox(
+                    width: _actionWidth,
+                    child: Align(
+                      alignment: AlignmentDirectional.centerEnd,
+                      // Already open in a tab: the button switches to it.
+                      child: isRepositoryOpen(repo.path)
+                          ? FilledButton.tonalIcon(
+                              onPressed: () => onOpenRepository(repo.path),
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size(0, 30),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                ),
+                              ),
+                              icon: const Icon(Icons.tab, size: 14),
+                              label: Text(translate('folder_update_go_to_tab')),
+                            )
+                          : OutlinedButton.icon(
+                              onPressed: () => onOpenRepository(repo.path),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size(0, 30),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                ),
+                              ),
+                              icon: const Icon(Icons.open_in_new, size: 14),
+                              label: Text(translate('folder_update_open')),
+                            ),
                     ),
+                  ),
                 ],
               ),
             ),
@@ -572,3 +584,6 @@ class _StatusLabel extends StatelessWidget {
     );
   }
 }
+
+/// Width of the Open / Go to tab button column in the repository table.
+const double _actionWidth = 120;
