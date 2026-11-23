@@ -295,6 +295,28 @@ pub unsafe extern "C" fn branchi_delete_branch(
     result_to_c_string(result)
 }
 
+/// Counts the commits on local branch `name` that `base` (a branch name,
+/// or null for the default branch) lacks, i.e. what deleting `name` would
+/// lose. Returns `{"ok": {"commits": n, "base": "origin/master"}}` or
+/// `{"error": "..."}`.
+///
+/// # Safety
+/// `path` and `name` must be valid, NUL-terminated UTF-8 C strings that
+/// outlive the call; `base` must be one too, or null.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_unmerged_commits(
+    path: *const c_char,
+    name: *const c_char,
+    base: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let name = c_str_to_string(name);
+    let base = (!base.is_null()).then(|| c_str_to_string(base));
+    let result =
+        GitRepo::open(&path).and_then(|repo| repo.unmerged_commits(&name, base.as_deref()));
+    result_to_json_c_string(result)
+}
+
 /// Updates branch `name` in the repository at `path`. When `is_remote` is
 /// true, `name` must be a remote-tracking branch (e.g. `origin/feature`) and
 /// this just fetches its remote. Otherwise `name` is a local branch that is

@@ -9,6 +9,14 @@ use git2::{Diff, DiffOptions, Repository, StatusOptions};
 use serde::Serialize;
 use std::path::Path;
 
+/// See [`GitRepo::unmerged_commits`].
+#[derive(Debug, Clone, Serialize)]
+pub struct UnmergedCommits {
+    pub commits: usize,
+    /// The branch they were compared with, e.g. `origin/master`.
+    pub base: Option<String>,
+}
+
 pub struct GitRepo {
     pub(crate) repo: Repository,
 }
@@ -749,23 +757,135 @@ impl GitRepo {
         Ok(())
     }
 
-    /// Deletes a local or remote-tracking branch reference. For a remote
-    /// branch this only removes the local tracking ref, mirroring `git
-    /// branch -dr`; it does not push a deletion to the remote server.
+    /// Deletes a branch. A local branch is deleted here only (git refuses
+    /// to delete the checked-out one). A remote branch (e.g.
+    /// `origin/feature`) is deleted on the server, like
+    /// `git push origin --delete feature`, and then its tracking ref here.
+    /// Fails, deleting nothing here, if the server refuses (e.g. a
+    /// protected branch).
     pub fn delete_branch(&self, name: &str, is_remote: bool) -> Result<()> {
-        let branch_type = if is_remote {
-            git2::BranchType::Remote
-        } else {
-            git2::BranchType::Local
-        };
+        if is_remote {
+            return self.delete_remote_branch(name);
+        }
         let mut branch = self
             .repo
-            .find_branch(name, branch_type)
+            .find_branch(name, git2::BranchType::Local)
             .with_context(|| format!("branch not found: {name}"))?;
         branch
             .delete()
             .with_context(|| format!("failed to delete branch: {name}"))?;
         Ok(())
+    }
+
+    /// Splits `origin/feature/x` into the remote (`origin`) and the branch
+    /// on it (`feature/x`), matching the longest configured remote name.
+    fn split_remote_branch(&self, remote_branch: &str) -> Result<(String, String)> {
+        let remotes = self.repo.remotes()?;
+        remotes
+            .iter()
+            .flatten()
+            .filter(|remote| {
+                remote_branch.len() > remote.len() + 1
+                    && remote_branch.starts_with(remote)
+                    && remote_branch.as_bytes()[remote.len()] == b'/'
+            })
+            .max_by_key(|remote| remote.len())
+            .map(|remote| {
+                (
+                    remote.to_string(),
+                    remote_branch[remote.len() + 1..].to_string(),
+                )
+            })
+            .with_context(|| format!("no remote for branch: {remote_branch}"))
+    }
+
+    fn delete_remote_branch(&self, remote_branch: &str) -> Result<()> {
+        // Must be a branch we know of, so a typo can't delete something else.
+        self.repo
+            .find_branch(remote_branch, git2::BranchType::Remote)
+            .with_context(|| format!("remote branch not found: {remote_branch}"))?;
+        let (remote_name, branch_name) = self.split_remote_branch(remote_branch)?;
+        let mut remote = self
+            .repo
+            .find_remote(&remote_name)
+            .with_context(|| format!("remote not found: {remote_name}"))?;
+
+        let rejected = std::cell::RefCell::new(None::<String>);
+        let mut callbacks = git2::RemoteCallbacks::new();
+        callbacks.credentials(|url, username, allowed| {
+            self.credentials_callback(url, username, allowed)
+        });
+        // A refused ref (e.g. a protected branch) isn't an error from
+        // `push` itself; it's only reported here.
+        callbacks.push_update_reference(|_refname, status| {
+            if let Some(message) = status {
+                *rejected.borrow_mut() = Some(message.to_string());
+            }
+            Ok(())
+        });
+        let mut push_options = git2::PushOptions::new();
+        push_options.remote_callbacks(callbacks);
+
+        let refspec = format!(":refs/heads/{branch_name}");
+        remote
+            .push(&[refspec.as_str()], Some(&mut push_options))
+            .with_context(|| format!("failed to delete {branch_name} on {remote_name}"))?;
+        drop(push_options);
+        if let Some(message) = rejected.into_inner() {
+            anyhow::bail!("{remote_name} refused to delete {branch_name}: {message}");
+        }
+
+        // The push usually drops the tracking ref already.
+        if let Ok(mut tracking) = self
+            .repo
+            .find_branch(remote_branch, git2::BranchType::Remote)
+        {
+            tracking.delete()?;
+        }
+        Ok(())
+    }
+
+    /// Commits on local branch `name` that aren't in `base` (a local or
+    /// remote branch; the default branch when `None`), so deleting `name`
+    /// would lose them. With no base to compare with, counts the commits
+    /// on no other branch at all.
+    pub fn unmerged_commits(&self, name: &str, base: Option<&str>) -> Result<UnmergedCommits> {
+        let branch = self
+            .repo
+            .find_branch(name, git2::BranchType::Local)
+            .with_context(|| format!("branch not found: {name}"))?;
+        let tip = branch.get().target().context("branch has no commit")?;
+
+        let base = match base {
+            Some(base) => self
+                .repo
+                .find_branch(base, git2::BranchType::Local)
+                .or_else(|_| self.repo.find_branch(base, git2::BranchType::Remote))
+                .ok()
+                .and_then(|b| Some((base.to_string(), b.get().target()?))),
+            None => self.default_branch(),
+        };
+
+        let mut walk = self.repo.revwalk()?;
+        walk.push(tip)?;
+        match &base {
+            Some((_, base_tip)) => walk.hide(*base_tip)?,
+            None => {
+                for other in self.repo.branches(None)? {
+                    let (other, _) = other?;
+                    if other.get().name() == branch.get().name() {
+                        continue;
+                    }
+                    if let Some(id) = other.get().target() {
+                        walk.hide(id)?;
+                    }
+                }
+            }
+        }
+        Ok(UnmergedCommits {
+            commits: walk.count(),
+            base: base.map(|(name, _)| name),
+        })
     }
 
     /// Fetches the remote that owns `remote_branch` (e.g. `origin` for
@@ -1888,6 +2008,109 @@ mod tests {
             .delete_branch(head.trim_start_matches("refs/heads/"), false)
             .is_err());
         assert!(repo.repo.find_reference(&head).is_ok());
+    }
+
+    /// A bare "server" repo with `master` and `feature`, and a clone of
+    /// it. (libgit2 only pushes to bare repos over the local transport.)
+    fn remote_with_feature() -> (tempfile::TempDir, git2::Repository, tempfile::TempDir, GitRepo) {
+        let seed_dir = tempfile::tempdir().unwrap();
+        let seed = GitRepo::init(seed_dir.path()).unwrap();
+        write_file(seed_dir.path(), "a.txt", "one");
+        seed.stage("a.txt").unwrap();
+        seed.commit("init", "Test User", "test@example.com").unwrap();
+        {
+            let head = seed.repo.head().unwrap().peel_to_commit().unwrap();
+            seed.repo.branch("feature", &head, false).unwrap();
+        }
+        let server_dir = tempfile::tempdir().unwrap();
+        let server = git2::Repository::init_bare(server_dir.path()).unwrap();
+        {
+            let mut push = seed
+                .repo
+                .remote("server", server_dir.path().to_str().unwrap())
+                .unwrap();
+            push.push(
+                &["refs/heads/master:refs/heads/master", "refs/heads/feature:refs/heads/feature"],
+                None,
+            )
+            .unwrap();
+        }
+        server.set_head("refs/heads/master").unwrap();
+        let local_dir = tempfile::tempdir().unwrap();
+        let local_repo =
+            GitRepo::clone(server_dir.path().to_str().unwrap(), local_dir.path()).unwrap();
+        (server_dir, server, local_dir, local_repo)
+    }
+
+    #[test]
+    fn delete_remote_branch_deletes_it_on_the_server() {
+        let (_sd, server, _ld, local_repo) = remote_with_feature();
+        local_repo.delete_branch("origin/feature", true).unwrap();
+
+        assert!(server.find_branch("feature", git2::BranchType::Local).is_err());
+        assert!(local_repo
+            .repo
+            .find_branch("origin/feature", git2::BranchType::Remote)
+            .is_err());
+        // Other branches are untouched, there and here.
+        assert!(server.find_branch("master", git2::BranchType::Local).is_ok());
+        assert!(local_repo
+            .repo
+            .find_branch("origin/master", git2::BranchType::Remote)
+            .is_ok());
+    }
+
+    #[test]
+    fn delete_remote_branch_keeps_everything_when_the_server_is_unreachable() {
+        let (_sd, _server, _ld, local_repo) = remote_with_feature();
+        local_repo
+            .repo
+            .remote_set_url("origin", "/nonexistent/branchi-test-remote.git")
+            .unwrap();
+        assert!(local_repo.delete_branch("origin/feature", true).is_err());
+        assert!(local_repo
+            .repo
+            .find_branch("origin/feature", git2::BranchType::Remote)
+            .is_ok());
+    }
+
+    #[test]
+    fn delete_remote_branch_needs_a_known_remote_branch() {
+        let (_sd, server, _ld, local_repo) = remote_with_feature();
+        assert!(local_repo.delete_branch("origin/nope", true).is_err());
+        assert!(local_repo.delete_branch("feature", true).is_err());
+        assert!(server.find_branch("feature", git2::BranchType::Local).is_ok());
+    }
+
+    #[test]
+    fn unmerged_commits_counts_what_the_base_lacks() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        write_file(dir.path(), "a.txt", "one");
+        repo.stage("a.txt").unwrap();
+        repo.commit("init", "Test User", "test@example.com").unwrap();
+        let main = repo.repo.head().unwrap().shorthand().unwrap().to_string();
+
+        repo.create_branch("feature", None).unwrap();
+        let none = repo.unmerged_commits("feature", Some(&main)).unwrap();
+        assert_eq!(none.commits, 0);
+        assert_eq!(none.base.as_deref(), Some(main.as_str()));
+
+        repo.checkout_branch("feature").unwrap();
+        for (i, f) in ["b.txt", "c.txt"].iter().enumerate() {
+            write_file(dir.path(), f, "x");
+            repo.stage(f).unwrap();
+            repo.commit(&format!("work {i}"), "Test User", "test@example.com")
+                .unwrap();
+        }
+        repo.checkout_branch(&main).unwrap();
+        assert_eq!(repo.unmerged_commits("feature", Some(&main)).unwrap().commits, 2);
+        // Default base (local main/master here).
+        assert_eq!(repo.unmerged_commits("feature", None).unwrap().commits, 2);
+
+        // Once another branch holds them, comparing with that is clean.
+        repo.create_branch("keep", Some("feature")).unwrap();
+        assert_eq!(repo.unmerged_commits("feature", Some("keep")).unwrap().commits, 0);
     }
 
     #[test]

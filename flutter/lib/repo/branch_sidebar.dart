@@ -340,35 +340,87 @@ class _BranchSidebarState extends State<BranchSidebar> {
     );
   }
 
-  Future<void> _delete(BranchEntry branch) async {
+  /// A confirm dialog with a red [action] button; true when confirmed.
+  Future<bool> _confirmDanger({
+    required String title,
+    required String body,
+    required String action,
+  }) async {
+    final b = context.branchi;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text(
-          branch.isRemote
-              ? translate('branch_delete_remote_title')
-                  .replaceAll('{remote}', branch.name.split('/').first)
-              : translate('bs_delete_title'),
-        ),
-        content: Text(
-          branch.isRemote
-              ? translate('branch_delete_remote_body')
-                  .replaceAll('{branch}', branch.name)
-              : translate('bs_delete_body').replaceAll('{branch}', branch.name),
+        title: Text(title),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Text(body),
         ),
         actions: [
           TextButton(
+            autofocus: true,
             onPressed: () => Navigator.pop(dialogContext, false),
             child: Text(translate('cancel')),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: b.del,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(translate('bs_delete')),
+            child: Text(action),
           ),
         ],
       ),
     );
-    if (confirmed != true || !mounted) return;
+    return confirmed == true && mounted;
+  }
+
+  /// Deletes [branch] after confirming. A remote branch is deleted on the
+  /// server. A local branch with commits its base lacks needs a second,
+  /// explicit confirmation, since deleting it loses them.
+  Future<void> _delete(BranchEntry branch) async {
+    final confirmed = await _confirmDanger(
+      title: branch.isRemote
+          ? translate('branch_delete_remote_title')
+              .replaceAll('{remote}', branch.name.split('/').first)
+          : translate('bs_delete_title'),
+      body: branch.isRemote
+          ? translate('branch_delete_remote_body')
+              .replaceAll('{branch}', branch.name)
+          : translate('bs_delete_body').replaceAll('{branch}', branch.name),
+      action: translate('bs_delete'),
+    );
+    if (!confirmed) return;
+
+    if (!branch.isRemote) {
+      final unmerged = await GitActions.unmergedCommits(
+        widget.repoPath,
+        branch.name,
+        base: _currentBase,
+      );
+      if (!mounted) return;
+      if (unmerged == null || unmerged.commits > 0) {
+        final String body;
+        if (unmerged == null) {
+          body = translate('bs_unmerged_unknown')
+              .replaceAll('{branch}', branch.name);
+        } else {
+          final base = _baseLabel(unmerged.base);
+          body = translate(base == null
+                  ? 'bs_unmerged_body_no_base'
+                  : 'bs_unmerged_body')
+              .replaceAll('{branch}', branch.name)
+              .replaceAll('{n}', '${unmerged.commits}')
+              .replaceAll('{base}', base ?? '');
+        }
+        final again = await _confirmDanger(
+          title: translate('bs_unmerged_title'),
+          body: body,
+          action: translate('bs_delete_anyway'),
+        );
+        if (!again) return;
+      }
+    }
 
     final result = await GitActions.deleteBranch(
       widget.repoPath,
