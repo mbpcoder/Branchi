@@ -229,8 +229,25 @@ impl GitRepo {
     }
 
     /// Clone `url` into `path`.
+    ///
+    /// Authenticates the same way fetch and push do (see
+    /// [`remote_credentials`]), using the global git config since there is
+    /// no repository config yet. Without this a private HTTPS repo fails
+    /// with a 401.
     pub fn clone(url: &str, path: impl AsRef<Path>) -> Result<Self> {
-        let repo = Repository::clone(url, path.as_ref())
+        let config = git2::Config::open_default().ok();
+
+        let mut callbacks = git2::RemoteCallbacks::new();
+        callbacks.credentials(|url, username, allowed| {
+            remote_credentials(config.as_ref(), url, username, allowed)
+        });
+
+        let mut fetch_options = git2::FetchOptions::new();
+        fetch_options.remote_callbacks(callbacks);
+
+        let repo = git2::build::RepoBuilder::new()
+            .fetch_options(fetch_options)
+            .clone(url, path.as_ref())
             .with_context(|| format!("failed to clone {url} into {}", path.as_ref().display()))?;
         Ok(Self { repo })
     }
@@ -1051,53 +1068,15 @@ impl GitRepo {
         Ok(())
     }
 
-    /// Supplies credentials for a remote operation (fetch/push): an SSH key
-    /// from a running ssh-agent for SSH remotes, the configured
-    /// `credential.helper` for HTTPS remotes (e.g. Git Credential Manager,
-    /// `osxkeychain`, `store`), or the platform's native default
-    /// credentials (e.g. Windows SSPI) as a last resort.
-    ///
-    /// On Windows, the helper process is spawned with `CREATE_NO_WINDOW` so
-    /// it doesn't flash a console window (this app has none of its own).
-    /// Elsewhere it goes through `git2::Cred::credential_helper` directly,
-    /// which has no such issue.
+    /// Supplies credentials for a fetch or push; see [`remote_credentials`].
     fn credentials_callback(
         &self,
         url: &str,
         username_from_url: Option<&str>,
         allowed_types: git2::CredentialType,
     ) -> std::result::Result<git2::Cred, git2::Error> {
-        if allowed_types.contains(git2::CredentialType::SSH_KEY) {
-            if let Some(username) = username_from_url {
-                if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
-                    return Ok(cred);
-                }
-            }
-        }
-
-        if allowed_types.contains(git2::CredentialType::USER_PASS_PLAINTEXT) {
-            #[cfg(windows)]
-            {
-                if let Some((username, password)) =
-                    windows_credential_helper(&self.repo, url, username_from_url)
-                {
-                    if let Ok(cred) = git2::Cred::userpass_plaintext(&username, &password) {
-                        return Ok(cred);
-                    }
-                }
-            }
-            #[cfg(not(windows))]
-            {
-                if let Ok(config) = self.repo.config() {
-                    if let Ok(cred) = git2::Cred::credential_helper(&config, url, username_from_url)
-                    {
-                        return Ok(cred);
-                    }
-                }
-            }
-        }
-
-        git2::Cred::default()
+        let config = self.repo.config().ok();
+        remote_credentials(config.as_ref(), url, username_from_url, allowed_types)
     }
 
     /// The commit id `rev` resolves to, or `None` if it doesn't resolve
@@ -1571,7 +1550,57 @@ pub fn set_global_identity(name: &str, email: &str) -> Result<()> {
     Ok(())
 }
 
-/// Runs the repository's configured `credential.helper` to obtain a
+/// Supplies credentials for a remote operation (clone/fetch/push): an SSH
+/// key from a running ssh-agent for SSH remotes, the configured
+/// `credential.helper` for HTTPS remotes (e.g. Git Credential Manager,
+/// `osxkeychain`, `store`), or the platform's native default credentials
+/// (e.g. Windows SSPI) as a last resort.
+///
+/// `config` is the repository's config, or the global one for a clone.
+///
+/// On Windows, the helper process is spawned with `CREATE_NO_WINDOW` so it
+/// doesn't flash a console window (this app has none of its own).
+/// Elsewhere it goes through `git2::Cred::credential_helper` directly,
+/// which has no such issue.
+fn remote_credentials(
+    config: Option<&git2::Config>,
+    url: &str,
+    username_from_url: Option<&str>,
+    allowed_types: git2::CredentialType,
+) -> std::result::Result<git2::Cred, git2::Error> {
+    if allowed_types.contains(git2::CredentialType::SSH_KEY) {
+        if let Some(username) = username_from_url {
+            if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
+                return Ok(cred);
+            }
+        }
+    }
+
+    if allowed_types.contains(git2::CredentialType::USER_PASS_PLAINTEXT) {
+        if let Some(config) = config {
+            #[cfg(windows)]
+            {
+                if let Some((username, password)) =
+                    windows_credential_helper(config, url, username_from_url)
+                {
+                    if let Ok(cred) = git2::Cred::userpass_plaintext(&username, &password) {
+                        return Ok(cred);
+                    }
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                if let Ok(cred) = git2::Cred::credential_helper(config, url, username_from_url) {
+                    return Ok(cred);
+                }
+            }
+        }
+    }
+
+    git2::Cred::default()
+}
+
+/// Runs the configured `credential.helper` to obtain a
 /// username/password for an HTTPS remote, the same protocol `git` itself
 /// uses to talk to a helper (`<cmd> get`, `key=value` lines on stdin,
 /// `username=`/`password=` lines read back from stdout).
@@ -1581,7 +1610,7 @@ pub fn set_global_identity(name: &str, email: &str) -> Result<()> {
 /// GUI app, which has no console of its own.
 #[cfg(windows)]
 fn windows_credential_helper(
-    repo: &git2::Repository,
+    config: &git2::Config,
     url: &str,
     username_from_url: Option<&str>,
 ) -> Option<(String, String)> {
@@ -1591,7 +1620,6 @@ fn windows_credential_helper(
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-    let config = repo.config().ok()?;
     let helper = config.get_string("credential.helper").ok()?;
     if helper.trim().is_empty() {
         return None;
