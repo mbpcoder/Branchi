@@ -229,8 +229,25 @@ impl GitRepo {
     }
 
     /// Clone `url` into `path`.
+    ///
+    /// Authenticates the same way fetch and push do (see
+    /// [`remote_credentials`]), using the global git config since there is
+    /// no repository config yet. Without this a private HTTPS repo fails
+    /// with a 401.
     pub fn clone(url: &str, path: impl AsRef<Path>) -> Result<Self> {
-        let repo = Repository::clone(url, path.as_ref())
+        let config = git2::Config::open_default().ok();
+
+        let mut callbacks = git2::RemoteCallbacks::new();
+        callbacks.credentials(|url, username, allowed| {
+            remote_credentials(config.as_ref(), url, username, allowed)
+        });
+
+        let mut fetch_options = git2::FetchOptions::new();
+        fetch_options.remote_callbacks(callbacks);
+
+        let repo = git2::build::RepoBuilder::new()
+            .fetch_options(fetch_options)
+            .clone(url, path.as_ref())
             .with_context(|| format!("failed to clone {url} into {}", path.as_ref().display()))?;
         Ok(Self { repo })
     }
@@ -330,6 +347,29 @@ impl GitRepo {
         let diff =
             self.repo
                 .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
+
+        Self::diff_to_file_entries(&diff)
+    }
+
+    /// The net file-level change of a range of commits, `oldest` through
+    /// `newest`: the first parent of `oldest` (or the empty tree, if it's a
+    /// root commit) against `newest`, one entry per changed file. A file
+    /// changed and changed back within the range doesn't appear.
+    pub fn commit_range_diff(&self, oldest: &str, newest: &str) -> Result<Vec<DiffFileEntry>> {
+        let find = |id: &str| -> Result<git2::Commit<'_>> {
+            let oid =
+                git2::Oid::from_str(id).with_context(|| format!("invalid commit id: {id}"))?;
+            Ok(self.repo.find_commit(oid)?)
+        };
+        let oldest = find(oldest)?;
+        let newest = find(newest)?;
+        let base_tree = oldest.parents().next().map(|p| p.tree()).transpose()?;
+        let tree = newest.tree()?;
+
+        let mut opts = DiffOptions::new();
+        let diff = self
+            .repo
+            .diff_tree_to_tree(base_tree.as_ref(), Some(&tree), Some(&mut opts))?;
 
         Self::diff_to_file_entries(&diff)
     }
@@ -1051,53 +1091,15 @@ impl GitRepo {
         Ok(())
     }
 
-    /// Supplies credentials for a remote operation (fetch/push): an SSH key
-    /// from a running ssh-agent for SSH remotes, the configured
-    /// `credential.helper` for HTTPS remotes (e.g. Git Credential Manager,
-    /// `osxkeychain`, `store`), or the platform's native default
-    /// credentials (e.g. Windows SSPI) as a last resort.
-    ///
-    /// On Windows, the helper process is spawned with `CREATE_NO_WINDOW` so
-    /// it doesn't flash a console window (this app has none of its own).
-    /// Elsewhere it goes through `git2::Cred::credential_helper` directly,
-    /// which has no such issue.
+    /// Supplies credentials for a fetch or push; see [`remote_credentials`].
     fn credentials_callback(
         &self,
         url: &str,
         username_from_url: Option<&str>,
         allowed_types: git2::CredentialType,
     ) -> std::result::Result<git2::Cred, git2::Error> {
-        if allowed_types.contains(git2::CredentialType::SSH_KEY) {
-            if let Some(username) = username_from_url {
-                if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
-                    return Ok(cred);
-                }
-            }
-        }
-
-        if allowed_types.contains(git2::CredentialType::USER_PASS_PLAINTEXT) {
-            #[cfg(windows)]
-            {
-                if let Some((username, password)) =
-                    windows_credential_helper(&self.repo, url, username_from_url)
-                {
-                    if let Ok(cred) = git2::Cred::userpass_plaintext(&username, &password) {
-                        return Ok(cred);
-                    }
-                }
-            }
-            #[cfg(not(windows))]
-            {
-                if let Ok(config) = self.repo.config() {
-                    if let Ok(cred) = git2::Cred::credential_helper(&config, url, username_from_url)
-                    {
-                        return Ok(cred);
-                    }
-                }
-            }
-        }
-
-        git2::Cred::default()
+        let config = self.repo.config().ok();
+        remote_credentials(config.as_ref(), url, username_from_url, allowed_types)
     }
 
     /// The commit id `rev` resolves to, or `None` if it doesn't resolve
@@ -1571,7 +1573,57 @@ pub fn set_global_identity(name: &str, email: &str) -> Result<()> {
     Ok(())
 }
 
-/// Runs the repository's configured `credential.helper` to obtain a
+/// Supplies credentials for a remote operation (clone/fetch/push): an SSH
+/// key from a running ssh-agent for SSH remotes, the configured
+/// `credential.helper` for HTTPS remotes (e.g. Git Credential Manager,
+/// `osxkeychain`, `store`), or the platform's native default credentials
+/// (e.g. Windows SSPI) as a last resort.
+///
+/// `config` is the repository's config, or the global one for a clone.
+///
+/// On Windows, the helper process is spawned with `CREATE_NO_WINDOW` so it
+/// doesn't flash a console window (this app has none of its own).
+/// Elsewhere it goes through `git2::Cred::credential_helper` directly,
+/// which has no such issue.
+fn remote_credentials(
+    config: Option<&git2::Config>,
+    url: &str,
+    username_from_url: Option<&str>,
+    allowed_types: git2::CredentialType,
+) -> std::result::Result<git2::Cred, git2::Error> {
+    if allowed_types.contains(git2::CredentialType::SSH_KEY) {
+        if let Some(username) = username_from_url {
+            if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
+                return Ok(cred);
+            }
+        }
+    }
+
+    if allowed_types.contains(git2::CredentialType::USER_PASS_PLAINTEXT) {
+        if let Some(config) = config {
+            #[cfg(windows)]
+            {
+                if let Some((username, password)) =
+                    windows_credential_helper(config, url, username_from_url)
+                {
+                    if let Ok(cred) = git2::Cred::userpass_plaintext(&username, &password) {
+                        return Ok(cred);
+                    }
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                if let Ok(cred) = git2::Cred::credential_helper(config, url, username_from_url) {
+                    return Ok(cred);
+                }
+            }
+        }
+    }
+
+    git2::Cred::default()
+}
+
+/// Runs the configured `credential.helper` to obtain a
 /// username/password for an HTTPS remote, the same protocol `git` itself
 /// uses to talk to a helper (`<cmd> get`, `key=value` lines on stdin,
 /// `username=`/`password=` lines read back from stdout).
@@ -1581,7 +1633,7 @@ pub fn set_global_identity(name: &str, email: &str) -> Result<()> {
 /// GUI app, which has no console of its own.
 #[cfg(windows)]
 fn windows_credential_helper(
-    repo: &git2::Repository,
+    config: &git2::Config,
     url: &str,
     username_from_url: Option<&str>,
 ) -> Option<(String, String)> {
@@ -1591,7 +1643,6 @@ fn windows_credential_helper(
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-    let config = repo.config().ok()?;
     let helper = config.get_string("credential.helper").ok()?;
     if helper.trim().is_empty() {
         return None;
@@ -1844,6 +1895,47 @@ mod tests {
         assert_eq!(diff[0].status, FileStatus::Modified);
         assert_eq!(diff[0].additions, 1);
         assert_eq!(diff[0].deletions, 0);
+    }
+
+    #[test]
+    fn commit_range_diff_shows_net_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        let commit = |message: &str| {
+            repo.commit(message, "Test User", "test@example.com")
+                .unwrap()
+        };
+
+        write_file(dir.path(), "a.txt", "one\n");
+        repo.stage("a.txt").unwrap();
+        commit("init");
+
+        write_file(dir.path(), "a.txt", "one\ntwo\n");
+        write_file(dir.path(), "tmp.txt", "scratch\n");
+        repo.stage("a.txt").unwrap();
+        repo.stage("tmp.txt").unwrap();
+        let second = commit("add line and scratch file");
+
+        fs::remove_file(dir.path().join("tmp.txt")).unwrap();
+        write_file(dir.path(), "b.txt", "new\n");
+        let mut index = repo.repo.index().unwrap();
+        index.remove_path(Path::new("tmp.txt")).unwrap();
+        index.write().unwrap();
+        repo.stage("b.txt").unwrap();
+        let third = commit("drop scratch file, add b");
+
+        let diff = repo.commit_range_diff(&second, &third).unwrap();
+        let mut paths: Vec<_> = diff.iter().map(|f| f.path.as_str()).collect();
+        paths.sort();
+        // tmp.txt was added and removed within the range.
+        assert_eq!(paths, ["a.txt", "b.txt"]);
+        let a = diff.iter().find(|f| f.path == "a.txt").unwrap();
+        assert_eq!(a.status, FileStatus::Modified);
+        assert_eq!((a.additions, a.deletions), (1, 0));
+
+        // A single-commit range matches commit_diff.
+        let single = repo.commit_range_diff(&third, &third).unwrap();
+        assert_eq!(single.len(), repo.commit_diff(&third).unwrap().len());
     }
 
     #[test]

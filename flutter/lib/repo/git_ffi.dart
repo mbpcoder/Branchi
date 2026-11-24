@@ -118,6 +118,17 @@ typedef _CommitDiffDart = Pointer<Utf8> Function(
   Pointer<Utf8> commitId,
 );
 
+typedef _CommitRangeDiffNative = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> oldest,
+  Pointer<Utf8> newest,
+);
+typedef _CommitRangeDiffDart = Pointer<Utf8> Function(
+  Pointer<Utf8> path,
+  Pointer<Utf8> oldest,
+  Pointer<Utf8> newest,
+);
+
 typedef _CheckoutBranchNative = Pointer<Utf8> Function(
   Pointer<Utf8> path,
   Pointer<Utf8> name,
@@ -332,6 +343,10 @@ class GitFfi {
             lib.lookupFunction<_CommitDiffNative, _CommitDiffDart>(
           'branchi_commit_diff',
         ),
+        _commitRangeDiff =
+            lib.lookupFunction<_CommitRangeDiffNative, _CommitRangeDiffDart>(
+          'branchi_commit_range_diff',
+        ),
         _checkoutBranch =
             lib.lookupFunction<_CheckoutBranchNative, _CheckoutBranchDart>(
           'branchi_checkout_branch',
@@ -458,6 +473,7 @@ class GitFfi {
   final _BranchReportDart _branchReport;
   final _BranchesDart _branches;
   final _CommitDiffDart _commitDiff;
+  final _CommitRangeDiffDart _commitRangeDiff;
   final _CheckoutBranchDart _checkoutBranch;
   final _CreateBranchDart _createBranch;
   final _DeleteBranchDart _deleteBranch;
@@ -768,6 +784,21 @@ class GitFfi {
     } finally {
       malloc.free(pathPtr);
       malloc.free(commitIdPtr);
+    }
+  }
+
+  /// The net file-level diff of the commits [oldest] through [newest], as
+  /// raw decoded JSON list entries. Throws a [GitFfiException] on failure.
+  List<dynamic> commitRangeDiff(String path, String oldest, String newest) {
+    final pathPtr = path.toNativeUtf8();
+    final oldestPtr = oldest.toNativeUtf8();
+    final newestPtr = newest.toNativeUtf8();
+    try {
+      return _consumeJsonList(_commitRangeDiff(pathPtr, oldestPtr, newestPtr));
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(oldestPtr);
+      malloc.free(newestPtr);
     }
   }
 

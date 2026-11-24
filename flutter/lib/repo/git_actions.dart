@@ -166,6 +166,25 @@ class GitActions {
         .toList();
   }
 
+  /// The net file-level change of the commits [oldest] through [newest]:
+  /// the first parent of [oldest] against [newest].
+  static Future<List<DiffFileEntry>> commitRangeDiff(
+    String path, {
+    required String oldest,
+    required String newest,
+  }) async {
+    final ffi = GitFfi.instanceOrNull;
+    if (ffi == null) throw StateError(_missingLibraryErrorWithPaths());
+
+    final raw = await Isolate.run(
+      () => ffi.commitRangeDiff(path, oldest, newest),
+    );
+    return raw
+        .cast<Map<String, dynamic>>()
+        .map(DiffFileEntry.fromJson)
+        .toList();
+  }
+
   /// Unified-diff patch of the uncommitted changes to [filePath]: staged
   /// (index vs HEAD) or unstaged (working tree vs index).
   static Future<String> workingDiff(

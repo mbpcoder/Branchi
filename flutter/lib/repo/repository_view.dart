@@ -59,11 +59,18 @@ class RepositoryViewState extends State<RepositoryView> {
   bool _isLoading = true;
   String? _loadError;
 
-  CommitEntry? _selectedCommit;
+  /// The selected commits, newest first (in log order).
+  List<CommitEntry> _selectedCommits = [];
   List<DiffFileEntry> _diffFiles = [];
+
+  /// Bumped per selection, so a slow diff for an earlier one is dropped.
+  int _diffRequest = 0;
   bool _isDiffLoading = false;
   String? _diffError;
   String? _selectedFilePath;
+
+  /// Whether History groups changed files by directory.
+  bool _filesAsTree = true;
 
   List<StatusEntry> _status = [];
   bool _isStatusLoading = false;
@@ -100,7 +107,7 @@ class RepositoryViewState extends State<RepositoryView> {
       _attachController();
     }
     if (oldWidget.path != widget.path) {
-      _selectedCommit = null;
+      _selectedCommits = [];
       _diffFiles = [];
       _selectedFilePath = null;
       _loadRepository();
@@ -147,10 +154,10 @@ class RepositoryViewState extends State<RepositoryView> {
         unawaited(_loadStatus());
       }
       if (current == RepoSection.changes) {
-        _selectedCommit = null;
+        _selectedCommits = [];
         unawaited(_loadStatus());
       } else if (current == RepoSection.history &&
-          _selectedCommit == null &&
+          _selectedCommits.isEmpty &&
           _commits.isNotEmpty) {
         _selectCommit(_commits.first);
       }
@@ -222,10 +229,12 @@ class RepositoryViewState extends State<RepositoryView> {
       PanelLayoutStore.loadSidebarWidth(),
       PanelLayoutStore.loadCommitListWidth(),
     ]);
+    final filesAsTree = await PanelLayoutStore.loadHistoryFilesAsTree();
     if (!mounted) return;
     setState(() {
       _sidebarWidth = results[0] ?? _defaultSidebarWidth;
       _commitListWidth = results[1] ?? _defaultCommitListWidth;
+      _filesAsTree = filesAsTree ?? true;
     });
   }
 
@@ -270,9 +279,10 @@ class RepositoryViewState extends State<RepositoryView> {
       _notifyBranchInfo();
       unawaited(_loadStatus());
       if (_commits.isNotEmpty && !_isViewingChanges) {
-        final previous = _selectedCommit?.id;
+        final listedIds = {for (final c in _commits) c.id};
         final stillListed =
-            previous != null && _commits.any((c) => c.id == previous);
+            _selectedCommits.isNotEmpty &&
+            _selectedCommits.every((c) => listedIds.contains(c.id));
         if (!stillListed) _selectCommit(_commits.first);
       }
     } catch (error) {
@@ -470,13 +480,19 @@ class RepositoryViewState extends State<RepositoryView> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _selectCommit(CommitEntry commit) async {
+  Future<void> _selectCommit(CommitEntry commit) => _selectCommits([commit]);
+
+  /// Selects [commits] (newest first) and loads their diff: a single
+  /// commit against its parent, or for several, their net change from the
+  /// oldest one's parent to the newest one.
+  Future<void> _selectCommits(List<CommitEntry> commits) async {
     if (_section == RepoSection.changes) {
       _lastSection = RepoSection.history;
       _controller.section = RepoSection.history;
     }
+    final request = ++_diffRequest;
     setState(() {
-      _selectedCommit = commit;
+      _selectedCommits = commits;
       _diffFiles = [];
       _selectedFilePath = null;
       _isDiffLoading = true;
@@ -484,20 +500,30 @@ class RepositoryViewState extends State<RepositoryView> {
     });
 
     try {
-      final diff = await GitActions.commitDiff(widget.path, commit.id);
-      if (!mounted || _selectedCommit?.id != commit.id) return;
+      final diff = commits.length == 1
+          ? await GitActions.commitDiff(widget.path, commits.single.id)
+          : await GitActions.commitRangeDiff(
+              widget.path,
+              oldest: commits.last.id,
+              newest: commits.first.id,
+            );
+      if (!mounted || request != _diffRequest) return;
       setState(() {
         _diffFiles = diff;
-        _selectedFilePath = diff.isEmpty ? null : diff.first.path;
         _isDiffLoading = false;
       });
     } catch (error) {
-      if (!mounted || _selectedCommit?.id != commit.id) return;
+      if (!mounted || request != _diffRequest) return;
       setState(() {
         _isDiffLoading = false;
         _diffError = error.toString();
       });
     }
+  }
+
+  void _setFilesAsTree(bool asTree) {
+    setState(() => _filesAsTree = asTree);
+    unawaited(PanelLayoutStore.saveHistoryFilesAsTree(asTree));
   }
 
   @override
@@ -601,8 +627,10 @@ class RepositoryViewState extends State<RepositoryView> {
                 Expanded(
                   child: CommitList(
                     commits: _commits,
-                    selectedId: _isViewingChanges ? null : _selectedCommit?.id,
-                    onSelect: _selectCommit,
+                    selectedIds: _isViewingChanges
+                        ? const {}
+                        : {for (final c in _selectedCommits) c.id},
+                    onSelect: _selectCommits,
                   ),
                 ),
               ],
@@ -616,13 +644,15 @@ class RepositoryViewState extends State<RepositoryView> {
         ),
         Expanded(
           child: CommitDetail(
-            commit: _selectedCommit,
+            commits: _selectedCommits,
             diffFiles: _diffFiles,
             isLoading: _isDiffLoading,
             error: _diffError,
             selectedFilePath: _selectedFilePath,
+            filesAsTree: _filesAsTree,
             onSelectFile: (path) => setState(() => _selectedFilePath = path),
             onOpenFile: _openFileInEditor,
+            onFilesAsTreeChanged: _setFilesAsTree,
           ),
         ),
       ],
