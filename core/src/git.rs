@@ -351,6 +351,29 @@ impl GitRepo {
         Self::diff_to_file_entries(&diff)
     }
 
+    /// The net file-level change of a range of commits, `oldest` through
+    /// `newest`: the first parent of `oldest` (or the empty tree, if it's a
+    /// root commit) against `newest`, one entry per changed file. A file
+    /// changed and changed back within the range doesn't appear.
+    pub fn commit_range_diff(&self, oldest: &str, newest: &str) -> Result<Vec<DiffFileEntry>> {
+        let find = |id: &str| -> Result<git2::Commit<'_>> {
+            let oid =
+                git2::Oid::from_str(id).with_context(|| format!("invalid commit id: {id}"))?;
+            Ok(self.repo.find_commit(oid)?)
+        };
+        let oldest = find(oldest)?;
+        let newest = find(newest)?;
+        let base_tree = oldest.parents().next().map(|p| p.tree()).transpose()?;
+        let tree = newest.tree()?;
+
+        let mut opts = DiffOptions::new();
+        let diff = self
+            .repo
+            .diff_tree_to_tree(base_tree.as_ref(), Some(&tree), Some(&mut opts))?;
+
+        Self::diff_to_file_entries(&diff)
+    }
+
     /// Unified-diff patch (git's standard format, including file and hunk
     /// headers) of the uncommitted changes to `path`. With `staged`, this
     /// is the index against HEAD (`git diff --cached -- <path>`); otherwise
@@ -1872,6 +1895,47 @@ mod tests {
         assert_eq!(diff[0].status, FileStatus::Modified);
         assert_eq!(diff[0].additions, 1);
         assert_eq!(diff[0].deletions, 0);
+    }
+
+    #[test]
+    fn commit_range_diff_shows_net_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        let commit = |message: &str| {
+            repo.commit(message, "Test User", "test@example.com")
+                .unwrap()
+        };
+
+        write_file(dir.path(), "a.txt", "one\n");
+        repo.stage("a.txt").unwrap();
+        commit("init");
+
+        write_file(dir.path(), "a.txt", "one\ntwo\n");
+        write_file(dir.path(), "tmp.txt", "scratch\n");
+        repo.stage("a.txt").unwrap();
+        repo.stage("tmp.txt").unwrap();
+        let second = commit("add line and scratch file");
+
+        fs::remove_file(dir.path().join("tmp.txt")).unwrap();
+        write_file(dir.path(), "b.txt", "new\n");
+        let mut index = repo.repo.index().unwrap();
+        index.remove_path(Path::new("tmp.txt")).unwrap();
+        index.write().unwrap();
+        repo.stage("b.txt").unwrap();
+        let third = commit("drop scratch file, add b");
+
+        let diff = repo.commit_range_diff(&second, &third).unwrap();
+        let mut paths: Vec<_> = diff.iter().map(|f| f.path.as_str()).collect();
+        paths.sort();
+        // tmp.txt was added and removed within the range.
+        assert_eq!(paths, ["a.txt", "b.txt"]);
+        let a = diff.iter().find(|f| f.path == "a.txt").unwrap();
+        assert_eq!(a.status, FileStatus::Modified);
+        assert_eq!((a.additions, a.deletions), (1, 0));
+
+        // A single-commit range matches commit_diff.
+        let single = repo.commit_range_diff(&third, &third).unwrap();
+        assert_eq!(single.len(), repo.commit_diff(&third).unwrap().len());
     }
 
     #[test]

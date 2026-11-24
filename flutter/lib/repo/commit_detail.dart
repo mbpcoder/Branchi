@@ -7,33 +7,46 @@ import '../theme/app_theme.dart';
 import 'commit_list.dart' show formatCommitDate;
 import 'models.dart';
 
-/// Right-hand pane: metadata for the selected commit plus a per-file diff
-/// viewer, or a loading/empty/error state.
+/// Changed-file rows shown before the file list scrolls.
+const int _maxVisibleFileRows = 6;
+const double _fileRowHeight = 34;
+
+/// Right-hand pane: metadata for the selected commit(s) plus a per-file
+/// diff viewer, or a loading/empty/error state. With several commits
+/// selected, [diffFiles] is their net change.
 class CommitDetail extends StatelessWidget {
   const CommitDetail({
     super.key,
-    required this.commit,
+    required this.commits,
     required this.diffFiles,
     required this.isLoading,
     required this.error,
     required this.selectedFilePath,
+    required this.filesAsTree,
     required this.onSelectFile,
     required this.onOpenFile,
+    required this.onFilesAsTreeChanged,
   });
 
-  final CommitEntry? commit;
+  /// The selected commits, newest first.
+  final List<CommitEntry> commits;
   final List<DiffFileEntry> diffFiles;
   final bool isLoading;
   final String? error;
+
+  /// The file whose patch is shown; null for the first listed file.
   final String? selectedFilePath;
+
+  /// Whether changed files are grouped by directory, or listed flat.
+  final bool filesAsTree;
   final ValueChanged<String> onSelectFile;
   final ValueChanged<String> onOpenFile;
+  final ValueChanged<bool> onFilesAsTreeChanged;
 
   @override
   Widget build(BuildContext context) {
     final b = context.branchi;
-    final commit = this.commit;
-    if (commit == null) {
+    if (commits.isEmpty) {
       return Center(
         child: Text(
           'Select a commit to see its changes',
@@ -42,11 +55,12 @@ class CommitDetail extends StatelessWidget {
       );
     }
 
-    final selectedFile = diffFiles.isEmpty
+    final listed = filesAsTree ? _treeOrder(diffFiles) : diffFiles;
+    final selectedFile = listed.isEmpty
         ? null
-        : diffFiles.firstWhere(
+        : listed.firstWhere(
             (f) => f.path == selectedFilePath,
-            orElse: () => diffFiles.first,
+            orElse: () => listed.first,
           );
 
     final Widget body;
@@ -77,16 +91,21 @@ class CommitDetail extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _FileList(
-            files: diffFiles,
+            files: listed,
+            asTree: filesAsTree,
             selected: selectedFile,
             onSelect: onSelectFile,
             onOpen: onOpenFile,
+            onAsTreeChanged: onFilesAsTreeChanged,
           ),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(32, 0, 32, 24),
               child: _PatchView(
-                key: ValueKey('${commit.id}:${selectedFile.path}'),
+                key: ValueKey(
+                  '${commits.first.id}..${commits.last.id}:'
+                  '${selectedFile.path}',
+                ),
                 file: selectedFile,
               ),
             ),
@@ -98,7 +117,10 @@ class CommitDetail extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _CommitHeader(commit: commit),
+        if (commits.length == 1)
+          _CommitHeader(commit: commits.single)
+        else
+          _RangeHeader(commits: commits),
         Expanded(child: body),
       ],
     );
@@ -139,25 +161,71 @@ class _CommitHeader extends StatelessWidget {
                 child: Text(commit.author, style: meta),
               ),
               Text(formatCommitDate(commit.time), style: meta),
+              _CopyableHash(commit: commit),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Header for several selected commits: how many, who wrote them, and
+/// the span they cover.
+class _RangeHeader extends StatelessWidget {
+  const _RangeHeader({required this.commits});
+
+  /// Newest first.
+  final List<CommitEntry> commits;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    final meta = TextStyle(fontSize: 12, color: b.muted);
+    final newest = commits.first;
+    final oldest = commits.last;
+    final authors = <String>{for (final c in commits) c.author}.toList();
+    final authorsLabel = authors.length <= 3
+        ? authors.join(', ')
+        : '${authors.take(3).join(', ')} +${authors.length - 3}';
+    return Container(
+      padding: const EdgeInsets.fromLTRB(32, 28, 32, 20),
+      decoration: BoxDecoration(border: Border(bottom: b.hairline)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${commits.length} commits selected',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.18,
+              color: b.fg,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 16,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(authorsLabel, style: meta),
+              Text(
+                '${formatCommitDate(oldest.time)} – '
+                '${formatCommitDate(newest.time)}',
+                style: meta,
+              ),
               Tooltip(
-                message: '${commit.id}\nClick to copy',
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: GestureDetector(
-                    onTap: () {
-                      Clipboard.setData(ClipboardData(text: commit.id));
-                      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                        const SnackBar(
-                          content: Text('Commit hash copied'),
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                    },
-                    child: Text(
-                      commit.shortId,
-                      style: b.mono(fontSize: 12, color: b.muted),
-                    ),
-                  ),
+                message:
+                    'Net change from the parent of the oldest selected '
+                    'commit to the newest one',
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _CopyableHash(commit: oldest),
+                    Text(' … ', style: meta),
+                    _CopyableHash(commit: newest),
+                  ],
                 ),
               ),
             ],
@@ -168,48 +236,289 @@ class _CommitHeader extends StatelessWidget {
   }
 }
 
-/// The changed files of the commit. The selected one is shown in full
-/// colour; the others are muted. The first row also carries the
-/// "N files changed" summary on the right.
-class _FileList extends StatelessWidget {
-  const _FileList({
-    required this.files,
-    required this.selected,
-    required this.onSelect,
-    required this.onOpen,
-  });
+/// A commit's short hash; clicking copies the full hash.
+class _CopyableHash extends StatelessWidget {
+  const _CopyableHash({required this.commit});
 
-  final List<DiffFileEntry> files;
-  final DiffFileEntry selected;
-  final ValueChanged<String> onSelect;
-  final ValueChanged<String> onOpen;
+  final CommitEntry commit;
 
   @override
   Widget build(BuildContext context) {
     final b = context.branchi;
-    final summary = Text(
-      files.length == 1 ? '1 file changed' : '${files.length} files changed',
-      style: TextStyle(fontSize: 12, color: b.muted),
-    );
-    final rows = [
-      for (var i = 0; i < files.length; i++)
-        _FileRow(
-          file: files[i],
-          selected: files[i].path == selected.path,
-          dimUnselected: files.length > 1,
-          trailing: i == 0 ? summary : null,
-          onTap: () => onSelect(files[i].path),
-          onOpen: () => onOpen(files[i].path),
+    return Tooltip(
+      message: '${commit.id}\nClick to copy',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: () {
+            Clipboard.setData(ClipboardData(text: commit.id));
+            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+              const SnackBar(
+                content: Text('Commit hash copied'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+          },
+          child: Text(
+            commit.shortId,
+            style: b.mono(fontSize: 12, color: b.muted),
+          ),
         ),
+      ),
+    );
+  }
+}
+
+/// A directory in the changed-files tree.
+class _DirNode {
+  _DirNode(this.name, this.path);
+
+  /// Shown label; chains of single-child directories are joined into one
+  /// node, e.g. `app/Http/Controllers`.
+  String name;
+
+  /// Full path from the repo root, used to remember collapsed folders.
+  String path;
+  final Map<String, _DirNode> dirs = {};
+  final List<DiffFileEntry> files = [];
+
+  int get fileCount =>
+      files.length + dirs.values.fold(0, (sum, d) => sum + d.fileCount);
+
+  List<_DirNode> get sortedDirs =>
+      dirs.values.toList()
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+  List<DiffFileEntry> get sortedFiles => files.toList()
+    ..sort(
+      (a, b) => _baseName(
+        a.path,
+      ).toLowerCase().compareTo(_baseName(b.path).toLowerCase()),
+    );
+}
+
+String _baseName(String path) => path.substring(path.lastIndexOf('/') + 1);
+
+_DirNode _buildTree(List<DiffFileEntry> files) {
+  final root = _DirNode('', '');
+  for (final file in files) {
+    final parts = file.path.split('/');
+    var node = root;
+    for (var i = 0; i < parts.length - 1; i++) {
+      final path = parts.sublist(0, i + 1).join('/');
+      node = node.dirs.putIfAbsent(parts[i], () => _DirNode(parts[i], path));
+    }
+    node.files.add(file);
+  }
+  void compact(_DirNode node) {
+    for (final child in node.dirs.values) {
+      while (child.files.isEmpty && child.dirs.length == 1) {
+        final only = child.dirs.values.single;
+        child
+          ..name = '${child.name}/${only.name}'
+          ..path = only.path;
+        child.dirs
+          ..clear()
+          ..addAll(only.dirs);
+        child.files.addAll(only.files);
+      }
+      compact(child);
+    }
+  }
+
+  compact(root);
+  return root;
+}
+
+/// [files] in the order the tree lists them: folders first, then files,
+/// each alphabetically.
+List<DiffFileEntry> _treeOrder(List<DiffFileEntry> files) {
+  final ordered = <DiffFileEntry>[];
+  void walk(_DirNode node) {
+    node.sortedDirs.forEach(walk);
+    ordered.addAll(node.sortedFiles);
+  }
+
+  walk(_buildTree(files));
+  return ordered;
+}
+
+/// The changed files, as a flat list of paths or grouped by directory.
+/// The selected one is shown in full colour; the others are muted.
+class _FileList extends StatefulWidget {
+  const _FileList({
+    required this.files,
+    required this.asTree,
+    required this.selected,
+    required this.onSelect,
+    required this.onOpen,
+    required this.onAsTreeChanged,
+  });
+
+  final List<DiffFileEntry> files;
+  final bool asTree;
+  final DiffFileEntry selected;
+  final ValueChanged<String> onSelect;
+  final ValueChanged<String> onOpen;
+  final ValueChanged<bool> onAsTreeChanged;
+
+  @override
+  State<_FileList> createState() => _FileListState();
+}
+
+class _FileListState extends State<_FileList> {
+  /// Paths of the folders the user collapsed.
+  final Set<String> _collapsed = {};
+
+  Widget _fileRow(DiffFileEntry file, {String? label, int depth = 0}) {
+    return _FileRow(
+      file: file,
+      label: label ?? file.path,
+      indent: widget.asTree ? depth * 16.0 : null,
+      selected: file.path == widget.selected.path,
+      dimUnselected: widget.files.length > 1,
+      onTap: () => widget.onSelect(file.path),
+      onOpen: () => widget.onOpen(file.path),
+    );
+  }
+
+  List<Widget> _treeRows(_DirNode node, int depth) {
+    return [
+      for (final dir in node.sortedDirs) ...[
+        _DirRow(
+          name: dir.name,
+          fileCount: dir.fileCount,
+          indent: depth * 16.0,
+          expanded: !_collapsed.contains(dir.path),
+          onTap: () => setState(() {
+            if (!_collapsed.remove(dir.path)) _collapsed.add(dir.path);
+          }),
+        ),
+        if (!_collapsed.contains(dir.path)) ..._treeRows(dir, depth + 1),
+      ],
+      for (final file in node.sortedFiles)
+        _fileRow(file, label: _baseName(file.path), depth: depth),
     ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    final files = widget.files;
+    final rows = widget.asTree
+        ? _treeRows(_buildTree(files), 0)
+        : [for (final file in files) _fileRow(file)];
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
-      child: files.length <= 6
-          ? Column(children: rows)
-          : ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 6 * 34.0),
+      padding: const EdgeInsets.fromLTRB(20, 6, 20, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Row(
+              children: [
+                Text(
+                  files.length == 1
+                      ? '1 file changed'
+                      : '${files.length} files changed',
+                  style: TextStyle(fontSize: 12, color: b.muted),
+                ),
+                const Spacer(),
+                IconButton(
+                  tooltip: widget.asTree
+                      ? 'Show as flat list'
+                      : 'Group by directory',
+                  isSelected: widget.asTree,
+                  icon: Icon(
+                    Icons.account_tree_outlined,
+                    size: 16,
+                    color: widget.asTree ? b.accent : b.muted,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints(
+                    minWidth: 28,
+                    minHeight: 28,
+                  ),
+                  padding: EdgeInsets.zero,
+                  onPressed: () => widget.onAsTreeChanged(!widget.asTree),
+                ),
+              ],
+            ),
+          ),
+          if (rows.length <= _maxVisibleFileRows)
+            Column(children: rows)
+          else
+            ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxHeight: _maxVisibleFileRows * _fileRowHeight,
+              ),
               child: ListView(shrinkWrap: true, children: rows),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A folder row in the tree: click to collapse or expand it.
+class _DirRow extends StatelessWidget {
+  const _DirRow({
+    required this.name,
+    required this.fileCount,
+    required this.indent,
+    required this.expanded,
+    required this.onTap,
+  });
+
+  final String name;
+  final int fileCount;
+  final double indent;
+  final bool expanded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = context.branchi;
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        hoverColor: b.hover,
+        splashFactory: NoSplash.splashFactory,
+        child: SizedBox(
+          height: _fileRowHeight,
+          child: Padding(
+            padding: EdgeInsets.only(left: 12 + indent, right: 12),
+            child: Row(
+              children: [
+                Icon(
+                  expanded ? Icons.expand_more : Icons.chevron_right,
+                  size: 16,
+                  color: b.muted,
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.folder_outlined, size: 14, color: b.muted),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: b.mono(fontSize: 12, color: b.fg),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  fileCount == 1 ? '1 file' : '$fileCount files',
+                  style: TextStyle(fontSize: 12, color: b.muted),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -217,19 +526,25 @@ class _FileList extends StatelessWidget {
 class _FileRow extends StatefulWidget {
   const _FileRow({
     required this.file,
+    required this.label,
+    required this.indent,
     required this.selected,
     required this.dimUnselected,
     required this.onTap,
     required this.onOpen,
-    this.trailing,
   });
 
   final DiffFileEntry file;
+
+  /// The full path, or in the tree just the file name.
+  final String label;
+
+  /// Indent in the tree; null in the flat list.
+  final double? indent;
   final bool selected;
   final bool dimUnselected;
   final VoidCallback onTap;
   final VoidCallback onOpen;
-  final Widget? trailing;
 
   @override
   State<_FileRow> createState() => _FileRowState();
@@ -265,9 +580,14 @@ class _FileRowState extends State<_FileRow> {
           hoverColor: b.hover,
           splashFactory: NoSplash.splashFactory,
           child: SizedBox(
-            height: 34,
+            height: _fileRowHeight,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              // In the tree, a file lines up with the folder icons at its
+              // depth, past the folders' chevrons.
+              padding: EdgeInsets.only(
+                left: 12 + (widget.indent == null ? 0 : widget.indent! + 20),
+                right: 12,
+              ),
               child: Row(
                 children: [
                   Tooltip(
@@ -279,11 +599,15 @@ class _FileRowState extends State<_FileRow> {
                   ),
                   const SizedBox(width: 10),
                   Flexible(
-                    child: Text(
-                      file.path,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: b.mono(fontSize: 12, color: pathColor),
+                    child: Tooltip(
+                      message: widget.label == file.path ? '' : file.path,
+                      waitDuration: const Duration(milliseconds: 600),
+                      child: Text(
+                        widget.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: b.mono(fontSize: 12, color: pathColor),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -311,8 +635,6 @@ class _FileRowState extends State<_FileRow> {
                       onPressed: widget.onOpen,
                     ),
                   ),
-                  const Spacer(),
-                  if (widget.trailing != null) widget.trailing!,
                 ],
               ),
             ),

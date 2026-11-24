@@ -160,6 +160,26 @@ pub unsafe extern "C" fn branchi_commit_diff(
     result_to_json_c_string(result)
 }
 
+/// Returns the net file-level diff of the commits `oldest` through `newest`
+/// (the first parent of `oldest` against `newest`) as a JSON string:
+/// `{"ok": [DiffFileEntry, ...]}` or `{"error": "..."}`.
+///
+/// # Safety
+/// `path`, `oldest` and `newest` must be valid, NUL-terminated UTF-8 C
+/// strings that outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn branchi_commit_range_diff(
+    path: *const c_char,
+    oldest: *const c_char,
+    newest: *const c_char,
+) -> *mut c_char {
+    let path = c_str_to_string(path);
+    let oldest = c_str_to_string(oldest);
+    let newest = c_str_to_string(newest);
+    let result = GitRepo::open(&path).and_then(|repo| repo.commit_range_diff(&oldest, &newest));
+    result_to_json_c_string(result)
+}
+
 /// Returns the Report section's commit data as a JSON string:
 /// `{"ok": CommitStatsReport}` or `{"error": "..."}`. `since`, `until`
 /// and `previous_since` are Unix seconds (see `GitRepo::commit_stats`).

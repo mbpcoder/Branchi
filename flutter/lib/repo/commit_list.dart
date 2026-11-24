@@ -1,22 +1,30 @@
 import 'dart:async';
+import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../theme/app_theme.dart';
 import 'models.dart';
 
 /// Middle pane: the commit log for the open repo, newest first.
+///
+/// Click selects one commit; Ctrl/Cmd+click adds or removes a commit and
+/// Shift+click selects the range from the last clicked commit.
 class CommitList extends StatefulWidget {
   const CommitList({
     super.key,
     required this.commits,
-    required this.selectedId,
+    required this.selectedIds,
     required this.onSelect,
   });
 
   final List<CommitEntry> commits;
-  final String? selectedId;
-  final ValueChanged<CommitEntry> onSelect;
+  final Set<String> selectedIds;
+
+  /// The new selection, in [commits] order (newest first); never empty.
+  final ValueChanged<List<CommitEntry>> onSelect;
 
   @override
   State<CommitList> createState() => _CommitListState();
@@ -27,11 +35,16 @@ class _CommitListState extends State<CommitList> {
   final ScrollController _scroll = ScrollController();
   String _query = '';
 
+  /// Where a Shift+click range starts: the last commit clicked without
+  /// Shift.
+  String? _anchorId;
+
   @override
   void initState() {
     super.initState();
     // E.g. History opened from line blame with a commit already selected.
-    if (widget.selectedId != null) {
+    if (widget.selectedIds.length == 1) {
+      _anchorId = widget.selectedIds.single;
       WidgetsBinding.instance.addPostFrameCallback((_) => _revealSelected());
     }
   }
@@ -39,7 +52,11 @@ class _CommitListState extends State<CommitList> {
   @override
   void didUpdateWidget(covariant CommitList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.selectedId != null && widget.selectedId != oldWidget.selectedId) {
+    // Only a single selection made elsewhere (e.g. from line blame) is
+    // scrolled to; a multi-selection is made here, where it's visible.
+    if (widget.selectedIds.length == 1 &&
+        !setEquals(widget.selectedIds, oldWidget.selectedIds)) {
+      _anchorId = widget.selectedIds.single;
       // After layout, so the list knows its size.
       WidgetsBinding.instance.addPostFrameCallback((_) => _revealSelected());
     }
@@ -57,7 +74,9 @@ class _CommitListState extends State<CommitList> {
   void _revealSelected() {
     if (!mounted || !_scroll.hasClients) return;
     final commits = _filteredCommits;
-    final index = commits.indexWhere((c) => c.id == widget.selectedId);
+    if (widget.selectedIds.length != 1) return;
+    final selectedId = widget.selectedIds.single;
+    final index = commits.indexWhere((c) => c.id == selectedId);
     if (index == -1) return;
     final position = _scroll.position;
     final viewport = position.viewportDimension;
@@ -77,6 +96,43 @@ class _CommitListState extends State<CommitList> {
         curve: Curves.easeOutCubic,
       ),
     );
+  }
+
+  /// Applies a click on [commit] to the selection, given the [visible]
+  /// (search-filtered) rows a Shift+click range is taken from.
+  void _handleTap(CommitEntry commit, List<CommitEntry> visible) {
+    final keys = HardwareKeyboard.instance;
+    final toggle = keys.isControlPressed || keys.isMetaPressed;
+    final anchorIndex = _anchorId == null
+        ? -1
+        : visible.indexWhere((c) => c.id == _anchorId);
+
+    final Set<String> ids;
+    if (keys.isShiftPressed && anchorIndex != -1) {
+      final index = visible.indexOf(commit);
+      ids = {
+        if (toggle) ...widget.selectedIds,
+        for (var i = math.min(anchorIndex, index);
+            i <= math.max(anchorIndex, index);
+            i++)
+          visible[i].id,
+      };
+    } else if (toggle) {
+      ids = {...widget.selectedIds};
+      if (!ids.remove(commit.id)) ids.add(commit.id);
+      // The last selected commit can't be deselected.
+      if (ids.isEmpty) return;
+      _anchorId = commit.id;
+    } else {
+      ids = {commit.id};
+      _anchorId = commit.id;
+    }
+
+    final selection = [
+      for (final c in widget.commits)
+        if (ids.contains(c.id)) c,
+    ];
+    if (selection.isNotEmpty) widget.onSelect(selection);
   }
 
   List<CommitEntry> get _filteredCommits {
@@ -136,8 +192,8 @@ class _CommitListState extends State<CommitList> {
                     return _CommitTile(
                       commit: commit,
                       now: now,
-                      selected: commit.id == widget.selectedId,
-                      onTap: () => widget.onSelect(commit),
+                      selected: widget.selectedIds.contains(commit.id),
+                      onTap: () => _handleTap(commit, commits),
                     );
                   },
                 ),
